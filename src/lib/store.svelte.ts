@@ -17,6 +17,7 @@ import {
   type ReadResult,
   type SearchHit,
   type SearchOptions,
+  type AiSelection,
   type ShellInfo,
   type SpawnRequest,
   type ToolInfo,
@@ -153,6 +154,7 @@ class Store {
 
   private toastSeq = 0;
   private wsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private aiContextTimer: ReturnType<typeof setTimeout> | null = null;
 
   get activeDoc(): Doc | null {
     return this.docs.find((d) => d.path === this.activePath) ?? null;
@@ -877,6 +879,32 @@ class Store {
 
   // ================= ターミナル・AI =================
 
+  /** 開いているファイルと選択範囲を、Claude Code のフックが読む文脈ファイルに書き出す（変わるたびに呼ぶ） */
+  scheduleAiContext() {
+    if (this.aiContextTimer) clearTimeout(this.aiContextTimer);
+    this.aiContextTimer = setTimeout(() => void this.syncAiContext(), 200);
+  }
+
+  async syncAiContext() {
+    if (this.aiContextTimer) clearTimeout(this.aiContextTimer);
+    this.aiContextTimer = null;
+    if (!this.root) return;
+    const doc = this.activeDoc;
+    let selection: AiSelection | null = null;
+    if (doc && this.view) {
+      const { from, to } = this.view.state.selection.main;
+      if (from !== to) {
+        const lines = this.view.state.doc;
+        selection = { fromLine: lines.lineAt(from).number, toLine: lines.lineAt(to).number, text: this.view.state.sliceDoc(from, to) };
+      }
+    }
+    try {
+      await api.setAiContext(doc?.path ?? null, selection);
+    } catch {
+      // 書けなくても AI ツールが文脈なしで動くだけなので知らせない
+    }
+  }
+
   terminalCwd(): string | null {
     const doc = this.activeDoc;
     if (this.config.terminal.cwd === 'noteDir' && doc) return dirname(doc.path);
@@ -888,6 +916,7 @@ class Store {
       this.toast('先にフォルダを開いてください', 'error');
       return;
     }
+    void this.syncAiContext();
     const doc = this.activeDoc;
     const selection = this.view && doc ? this.view.state.sliceDoc(this.view.state.selection.main.from, this.view.state.selection.main.to) : '';
     const shellId = opts.shellId ?? (this.config.terminal.defaultShell || null);

@@ -39,6 +39,8 @@ export type ToolInfo = {
   actions: { id: string; label: string }[];
 };
 
+export type AiSelection = { fromLine: number; toLine: number; text: string };
+
 export type PtyEvent = { type: 'data'; data: string } | { type: 'exit'; code: number | null };
 export type SpawnRequest = {
   shellId?: string | null;
@@ -100,6 +102,7 @@ export const api = {
   launchIdeTool: (toolId: string, actionId: string | null, note: string | null) =>
     invoke<void>('launch_ide_tool', { toolId, actionId, note }),
   aiToolsFilePath: () => invoke<string>('ai_tools_file_path'),
+  setAiContext: (note: string | null, selection: AiSelection | null) => invoke<void>('set_ai_context', { note, selection }),
 };
 
 export { Channel };

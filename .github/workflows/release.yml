@@ -1,0 +1,57 @@
+# v で始まるタグ（v0.2.0 など）を push すると、テストしてから Windows 用のインストーラーを作り、
+# GitHub の Releases に公開する。アプリのバージョンはタグから取る
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: タグからバージョンを設定する
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          # MSI は「数字.数字.数字」しか受け付けない
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "タグ ${{ github.ref_name }} は v1.2.3 の形にしてください" }
+          $path = 'src-tauri/tauri.conf.json'
+          $conf = Get-Content $path -Raw | ConvertFrom-Json
+          $conf.version = $version
+          $conf | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding utf8NoBOM
+
+      - run: npm ci
+
+      - name: テスト
+        run: |
+          npm run check
+          npm test
+          cd src-tauri
+          cargo test
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: mark-shell ${{ github.ref_name }}
+          releaseBody: インストーラーは下の Assets から選んでください（通常は *-setup.exe）。
+          releaseDraft: false
+          prerelease: false

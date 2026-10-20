@@ -41,6 +41,14 @@
     document.documentElement.dataset.theme = store.dark ? 'dark' : 'light';
   });
 
+  // 開いているファイルと選択範囲を Claude Code に伝える（store.cursor は選択が変わるたびに置き換わる）
+  $effect(() => {
+    void store.root;
+    void store.activePath;
+    void store.cursor;
+    store.scheduleAiContext();
+  });
+
   // タイトルバーなどウィンドウ枠もアプリのテーマに合わせる（system なら Windows の設定に従う）
   $effect(() => {
     const theme = store.config.theme;

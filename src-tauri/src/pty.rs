@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
+use crate::ai_context;
 use crate::ai_tools;
 use crate::config::local_dir;
 use crate::paths::resolve;
@@ -78,7 +79,14 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     let (mut cmd, title) = if let Some(tool_id) = req.tool_id.as_deref() {
         let (tool, path) = ai_tools::find(tool_id)?;
         let vars = ai_tools::Vars::new(&root, req.note.as_deref(), selection_file.as_deref());
-        let args = ai_tools::args_for(&tool, req.action_id.as_deref(), &vars)?;
+        let mut args = ai_tools::args_for(&tool, req.action_id.as_deref(), &vars)?;
+        // Claude Code には開いているファイルを伝えるフックを渡す。
+        // 以前の既定値のまま保存された ai-tools.json でも効くよう、定義に --settings がなければ足す
+        if tool.id == "claude-code" && !args.iter().any(|a| a == "--settings") {
+            if let Ok(p) = ai_context::claude_settings_file() {
+                args.splice(0..0, ["--settings".to_string(), p.to_string_lossy().into_owned()]);
+            }
+        }
         let tool_cwd = tool.launch.cwd.as_deref().map(|c| std::path::PathBuf::from(vars.expand(c))).filter(|p| p.is_dir());
         let cmd = if tool.launch.shell.as_deref() == Some("none") {
             let mut c = CommandBuilder::new(&path);
@@ -117,7 +125,8 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     if let Some(s) = &selection_file {
         cmd.env("MARKSHELL_SELECTION_FILE", s.to_string_lossy().as_ref());
     }
-    cmd.env("WSLENV", "MARKSHELL_ROOT/p:MARKSHELL_NOTE/p:MARKSHELL_SELECTION_FILE/p");
+    cmd.env("MARKSHELL_CONTEXT_FILE", ai_context::context_file().to_string_lossy().as_ref());
+    cmd.env("WSLENV", "MARKSHELL_ROOT/p:MARKSHELL_NOTE/p:MARKSHELL_SELECTION_FILE/p:MARKSHELL_CONTEXT_FILE/p");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "mark-shell");
 

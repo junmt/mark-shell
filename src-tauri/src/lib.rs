@@ -1,3 +1,4 @@
+mod ai_context;
 mod ai_tools;
 mod config;
 mod links;
@@ -12,6 +13,11 @@ mod watcher;
 mod workspace;
 
 use state::AppState;
+
+/// `mark-shell.exe --ai-context`（Claude Code のフック）の処理
+pub fn print_ai_context() {
+    ai_context::print_for_hook();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -61,7 +67,13 @@ pub fn run() {
             ai_tools::list_ai_tools,
             ai_tools::launch_ide_tool,
             ai_tools::ai_tools_file_path,
+            ai_context::set_ai_context,
         ])
-        .run(tauri::generate_context!())
-        .expect("mark-shell の起動に失敗しました");
+        .build(tauri::generate_context!())
+        .expect("mark-shell の起動に失敗しました")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                ai_context::remove_context_file();
+            }
+        });
 }

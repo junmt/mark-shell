@@ -228,6 +228,12 @@ impl Vars {
 
     pub fn expand(&self, s: &str) -> String {
         let mut out = s.to_string();
+        // 開いているファイルを Claude Code に伝えるフック定義（ai_context.rs）。使うときだけ書き出す
+        if out.contains("${claudeSettings}") {
+            if let Ok(p) = crate::ai_context::claude_settings_file() {
+                out = out.replace("${claudeSettings}", &p.to_string_lossy());
+            }
+        }
         for (k, v) in &self.map {
             out = out.replace(&format!("${{{k}}}"), v);
         }
