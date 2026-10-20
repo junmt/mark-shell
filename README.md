@@ -1,80 +1,82 @@
 # mark-shell
 
-指定したフォルダの中の Markdown ファイルを左のツリーで一覧し、右のエディタで編集・表示する Windows アプリです。内蔵ターミナルから Claude Code などの AI ツールを起動できます。仕様は [docs/](docs/README.md) を参照してください。
+A Windows app that lists the files in a folder in a tree on the left and lets you edit Markdown and other text files on the right, with a live preview for Markdown. A built-in terminal launches AI tools such as Claude Code, which are told which file you have open. Folders inside WSL are supported: like VS Code's WSL extension, the terminal and AI tools then run inside WSL. The specifications are in [docs/](docs/README.md) (in Japanese).
 
-## 必要なもの
+## Requirements
 
 - Windows 10 / 11
-- [Node.js](https://nodejs.org/) 20 以降
-- [Rust](https://www.rust-lang.org/)（`rustup` で stable）と、WSL 用エージェントのビルドに使う Linux 向けのターゲット（`rustup target add x86_64-unknown-linux-musl`）
-- Visual Studio の「C++ によるデスクトップ開発」（MSVC と Windows SDK）
-- WebView2 ランタイム（Windows 11 は標準で入っています）
+- [Node.js](https://nodejs.org/) 20 or later
+- [Rust](https://www.rust-lang.org/) (stable, via `rustup`) and the Linux target used to build the WSL agent (`rustup target add x86_64-unknown-linux-musl`)
+- Visual Studio "Desktop development with C++" (MSVC and the Windows SDK)
+- WebView2 Runtime (included with Windows 11)
 
-プロジェクトは Google ドライブなどの同期フォルダではなく、ローカルディスクに置いてください。同期フォルダ上では `npm install` が失敗します。
+Keep the project on a local disk, not in a synced folder such as Google Drive. `npm install` fails in synced folders.
 
-## 開発
+## Development
 
 ```powershell
 npm install
-npm run tauri dev          # 開発モードで起動（画面の変更は即時反映）。先に WSL 用エージェントもビルドする
+npm run tauri dev          # Start in development mode (UI changes reload instantly). Builds the WSL agent first
 ```
 
-ビルドした実行ファイルは `mark-shell.exe C:\Notes` のようにフォルダを指定して起動できます。
+A built executable can be started with a folder, e.g. `mark-shell.exe C:\Notes`.
 
-## テスト
+## Tests
 
 ```powershell
-npm test                   # 画面側（パス計算・ツリー・表の整形・Markdown 描画）
-npm run check              # 型チェック
-cd crates/core; cargo test # 共通部品（パス・文字コード・リンク書き換え）
-cd src-tauri; cargo test   # アプリ本体（AI ツール定義・文脈・WSL のパス）
+npm test                   # UI (path handling, tree, table formatting, Markdown rendering, color themes)
+npm run check              # Type checking
+cd crates/core; cargo test # Shared core (paths, text encodings, link rewriting)
+cd src-tauri; cargo test   # App (AI tool definitions, context, WSL paths)
 ```
 
-## 配布用のビルド
+## Building for distribution
 
 ```powershell
-npm run tauri build        # src-tauri/target/release/bundle/ に MSI と NSIS のインストーラーができる
+npm run tauri build        # Creates the MSI and NSIS installers in src-tauri/target/release/bundle/
 ```
 
-GitHub に `v1.2.3` の形のタグを push すると、GitHub Actions（`.github/workflows/release.yml`）がテストしてからインストーラー（`-setup.exe` と `.msi`）と単体実行版の exe（`-portable.exe`）を作り、Releases に公開します。アプリのバージョンはタグから取ります。
+Pushing a tag of the form `v1.2.3` to GitHub makes GitHub Actions (`.github/workflows/release.yml`) run the tests, build the installers (`-setup.exe` and `.msi`) and a standalone executable (`-portable.exe`), and publish them on Releases. The app version is taken from the tag. The release also includes signed update files and `latest.json`, which installed copies use to update themselves.
 
 ```powershell
 git tag v0.2.0
 git push origin v0.2.0
 ```
 
-## 構成
+## Layout
 
-| 場所 | 内容 |
+| Path | Contents |
 | --- | --- |
-| `src/` | 画面（Svelte 5 + TypeScript） |
-| `src/lib/store.svelte.ts` | アプリ全体の状態（タブ、保存、外部変更の取り込み、ファイル操作、検索、ターミナル） |
-| `src/lib/markdown.ts` | Markdown → HTML（GFM、数式、Mermaid、`[[内部リンク]]`、サニタイズ） |
-| `src/lib/editor.ts` | CodeMirror 6 の設定と編集コマンド |
-| `crates/core/` | Windows 版と WSL 用エージェントで共有する処理（探索・検索・監視・リンクの書き換え・文字コード） |
-| `crates/agent/` | WSL の中で動くエージェント。Windows 上で Linux 向け（musl）にビルドしてアプリに埋め込む |
-| `src-tauri/src/workspace.rs` | フォルダを開く・ファイル操作 |
-| `src-tauri/src/watcher.rs` | ファイル変更の監視 |
-| `src-tauri/src/search.rs` | 全文検索（インデックスなし） |
-| `src-tauri/src/wsl.rs` | WSL 統合（エージェントの配置・起動・やり取り） |
-| `src-tauri/src/pty.rs` | ConPTY によるターミナル |
-| `src-tauri/src/ai_tools.rs` | AI ツールの検出と起動 |
+| `src/` | UI (Svelte 5 + TypeScript) |
+| `src/lib/store.svelte.ts` | App state (tabs, saving, picking up external changes, file operations, search, terminal) |
+| `src/lib/markdown.ts` | Markdown → HTML (GFM, math, Mermaid, `[[wiki links]]`, sanitizing) |
+| `src/lib/editor.ts` | CodeMirror 6 setup and editing commands |
+| `src/lib/themes.ts` | Color theme presets and custom colors |
+| `crates/core/` | Code shared by the Windows app and the WSL agent (scanning, search, watching, link rewriting, text encodings) |
+| `crates/agent/` | Agent that runs inside WSL. Built on Windows for Linux (musl) and embedded in the app |
+| `src-tauri/src/workspace.rs` | Opening folders, file operations |
+| `src-tauri/src/watcher.rs` | Watching for file changes |
+| `src-tauri/src/search.rs` | Full-text search (no index) |
+| `src-tauri/src/wsl.rs` | WSL integration (deploying, starting and talking to the agent) |
+| `src-tauri/src/pty.rs` | Terminal via ConPTY |
+| `src-tauri/src/ai_tools.rs` | Detecting and launching AI tools |
+| `src-tauri/src/ai_context.rs` | Telling Claude Code which file is open (via a hook) |
 
-## 仕様のうち未実装のもの
+## Not yet implemented
 
-- ターミナルのタブを左右・上下に分割する
-- HTML へのエクスポート（印刷から「Microsoft Print to PDF」を選べば PDF にはできる）
-- ツリーの表示名をフロントマターの `title` や最初の見出しにする設定
-- 自動更新
-- AI による変更の差分を Git の履歴から出す（いまは開いていたファイルについて、アプリが覚えている変更前の内容と比べる）
-- Shift_JIS など UTF-8 以外のファイルの全文検索（開く・編集・保存はできる）
+- Splitting terminal tabs side by side or top and bottom
+- Exporting to HTML (you can make a PDF by printing to "Microsoft Print to PDF")
+- Showing the front matter `title` or the first heading as the name in the tree
+- Showing diffs of AI changes from Git history (currently the app compares open files with the content it remembers from before the change)
+- Full-text search in files that are not UTF-8, such as Shift_JIS (opening, editing and saving them works)
 
-## データの置き場所
+## Where data is stored
 
-アプリは開いたフォルダの中に設定ファイルを作りません。
+The app does not create settings files inside the folders you open.
 
-| 場所 | 内容 |
+| Path | Contents |
 | --- | --- |
-| `%APPDATA%\mark-shell\config.json` | 設定 |
-| `%APPDATA%\mark-shell\ai-tools.json` | AI ツールの定義（ツールの追加はここに書く） |
-| `%LOCALAPPDATA%\mark-shell\` | フォルダごとの状態、最近開いたフォルダ、異常終了時の復元データ |
+| `%APPDATA%\mark-shell\config.json` | Settings |
+| `%APPDATA%\mark-shell\ai-tools.json` | AI tool definitions (add your own tools here) |
+| `%LOCALAPPDATA%\mark-shell\` | Per-folder state, recently opened folders, crash recovery data, Claude Code hook settings |
+| `~/.mark-shell/` (inside WSL) | The WSL agent, placed there the first time you open a WSL folder |
