@@ -57,7 +57,7 @@ pub fn build_matcher(o: &SearchOptions) -> Result<RegexMatcher, String> {
         .fixed_strings(!o.regex)
         .line_terminator(Some(b'\n'))
         .build(&o.query)
-        .map_err(|e| format!("検索条件が正しくありません: {e}"))
+        .map_err(|e| crate::tr!("検索条件が正しくありません: {e}", "Invalid search query: {e}", "搜索条件无效：{e}"))
 }
 
 fn utf16_len(s: &str) -> usize {
@@ -181,7 +181,7 @@ fn build_regex(o: &SearchOptions) -> Result<regex::Regex, String> {
         .case_insensitive(!o.case_sensitive)
         .multi_line(true)
         .build()
-        .map_err(|e| format!("検索条件が正しくありません: {e}"))
+        .map_err(|e| crate::tr!("検索条件が正しくありません: {e}", "Invalid search query: {e}", "搜索条件无效：{e}"))
 }
 
 /// 検索結果のファイルに一括置換をかける（文字コード・改行コードは保つ）
@@ -190,7 +190,7 @@ pub fn replace(root: &Path, o: &SearchOptions, replacement: &str, paths: &[Strin
     let mut files = Vec::new();
     let mut replacements = 0;
     for rel in paths {
-        let rel = normalize_rel(rel).ok_or("不正なパスです")?;
+        let rel = normalize_rel(rel).ok_or_else(crate::paths::invalid_path)?;
         let p = resolve(root, &rel)?;
         let Ok(bytes) = std::fs::read(&p) else { continue };
         let d = textio::decode(&bytes);

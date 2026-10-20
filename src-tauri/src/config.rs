@@ -56,6 +56,16 @@ pub fn get_config() -> Value {
     read_config()
 }
 
+/// 画面側で決めた表示言語（ja / en / zh）。エラーメッセージなどをその言語にする
+#[tauri::command]
+pub fn set_locale(state: State<'_, AppState>, locale: String) {
+    use markshell_core::i18n;
+    i18n::set_locale(i18n::parse(&locale));
+    if let Some(wsl) = state.wsl() {
+        let _ = wsl.agent.request("locale", serde_json::json!({ "locale": locale }));
+    }
+}
+
 #[tauri::command]
 pub fn set_config(state: State<'_, AppState>, config: Value) -> Result<(), String> {
     write_json(&config_dir().join("config.json"), &config)?;
@@ -187,7 +197,7 @@ fn reg(args: &[&str]) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!("reg.exe が失敗しました: {args:?}"))
+        Err(markshell_core::tr!("reg.exe が失敗しました: {args:?}", "reg.exe failed: {args:?}", "reg.exe 执行失败：{args:?}"))
     }
 }
 
@@ -195,10 +205,12 @@ fn reg(args: &[&str]) -> Result<(), String> {
 pub fn register_explorer_menu(enable: bool) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe = exe.to_string_lossy();
+    // メニューの文言は登録したときの言語になる
+    let label = markshell_core::tr!("mark-shell で開く", "Open with mark-shell", "用 mark-shell 打开");
     for (i, key) in MENU_KEYS.iter().enumerate() {
         if enable {
             let arg = if i == 0 { "%1" } else { "%V" };
-            reg(&["add", key, "/ve", "/d", "mark-shell で開く", "/f"])?;
+            reg(&["add", key, "/ve", "/d", &label, "/f"])?;
             reg(&["add", key, "/v", "Icon", "/d", &exe, "/f"])?;
             let cmd_key = format!(r"{key}\command");
             let cmd = format!("\"{exe}\" \"{arg}\"");

@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { store } from '../lib/store.svelte';
   import { api } from '../lib/api';
+  import { tr } from '../lib/i18n.svelte';
   import { basename, dirname } from '../lib/paths';
 
   type Item = {
@@ -76,8 +77,8 @@
           label: name,
           detail: r,
           run: () => void store.openRoot(r),
-          primaryLabel: 'このウィンドウで開く',
-          alt: { label: '新しいウィンドウで開く', run: () => void api.openNewWindow(r) },
+          primaryLabel: tr('このウィンドウで開く', 'Open in this window', '在此窗口中打开'),
+          alt: { label: tr('新しいウィンドウで開く', 'Open in new window', '在新窗口中打开'), run: () => void api.openNewWindow(r) },
         }));
     }
     if (store.palette === 'commands') {
@@ -114,7 +115,7 @@
   function itemMenu(e: MouseEvent, item: Item) {
     if (!item.alt) return;
     store.openMenu(e, [
-      { label: item.primaryLabel ?? '開く', shortcut: 'Enter', action: () => choose(item) },
+      { label: item.primaryLabel ?? tr('開く', 'Open', '打开'), shortcut: 'Enter', action: () => choose(item) },
       { label: item.alt.label, shortcut: 'Shift+Enter', action: () => choose(item, true) },
     ]);
   }
@@ -132,12 +133,20 @@
 
 {#if store.palette}
   <div class="backdrop" role="presentation" onclick={close}></div>
-  <div class="palette" role="dialog" aria-label={{ files: 'ファイルを開く', commands: 'コマンド', folders: '最近開いたフォルダ' }[store.palette]}>
+  <div class="palette" role="dialog" aria-label={{
+      files: tr('ファイルを開く', 'Open file', '打开文件'),
+      commands: tr('コマンド', 'Commands', '命令'),
+      folders: tr('最近開いたフォルダ', 'Recent folders', '最近打开的文件夹'),
+    }[store.palette]}>
     <input
       bind:this={input}
       bind:value={query}
       onkeydown={keydown}
-      placeholder={{ files: 'ファイル名で検索', commands: 'コマンドを検索', folders: '最近開いたフォルダを名前で検索' }[store.palette]}
+      placeholder={{
+        files: tr('ファイル名で検索', 'Search by file name', '按文件名搜索'),
+        commands: tr('コマンドを検索', 'Search commands', '搜索命令'),
+        folders: tr('最近開いたフォルダを名前で検索', 'Search recent folders by name', '按名称搜索最近打开的文件夹'),
+      }[store.palette]}
       spellcheck="false"
     />
     <div class="list">
@@ -154,11 +163,17 @@
           {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
         </button>
       {:else}
-        <div class="none">見つかりません</div>
+        <div class="none">{tr('見つかりません', 'No results', '未找到')}</div>
       {/each}
     </div>
     {#if store.palette === 'folders' && items.length > 0}
-      <div class="hint">Enter: このウィンドウで開く　Shift+Enter: 新しいウィンドウで開く（右クリックでも選べます）</div>
+      <div class="hint">
+        {tr(
+          'Enter: このウィンドウで開く　Shift+Enter: 新しいウィンドウで開く（右クリックでも選べます）',
+          'Enter: open in this window   Shift+Enter: open in new window (also via right-click)',
+          'Enter: 在此窗口中打开　Shift+Enter: 在新窗口中打开（也可右键选择）',
+        )}
+      </div>
     {/if}
   </div>
 {/if}

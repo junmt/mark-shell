@@ -43,7 +43,7 @@ impl AppState {
             .read()
             .unwrap()
             .clone()
-            .ok_or_else(|| "フォルダが開かれていません".to_string())
+            .ok_or_else(|| markshell_core::tr!("フォルダが開かれていません", "No folder is open", "未打开文件夹"))
     }
 
     pub fn wsl(&self) -> Option<Arc<WslRoot>> {

@@ -14,6 +14,7 @@
   } from '../lib/editor';
   import { lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
   import { store, type Doc } from '../lib/store.svelte';
+  import { tr } from '../lib/i18n.svelte';
   import { headings, slugify } from '../lib/markdown';
 
   // 表示中のエディタは常に 1 つなので、エディタの状態に埋め込むコールバックは共通にする。
@@ -49,24 +50,24 @@
     if (!view || !doc) return;
     const hasSel = !view.state.selection.main.empty;
     const items = [
-      { label: '切り取り', shortcut: 'Ctrl+X', disabled: !hasSel, action: () => document.execCommand('cut') },
-      { label: 'コピー', shortcut: 'Ctrl+C', disabled: !hasSel, action: () => document.execCommand('copy') },
+      { label: tr('切り取り', 'Cut', '剪切'), shortcut: 'Ctrl+X', disabled: !hasSel, action: () => document.execCommand('cut') },
+      { label: tr('コピー', 'Copy', '复制'), shortcut: 'Ctrl+C', disabled: !hasSel, action: () => document.execCommand('copy') },
       {
-        label: '貼り付け',
+        label: tr('貼り付け', 'Paste', '粘贴'),
         shortcut: 'Ctrl+V',
         action: async () => {
           const text = await navigator.clipboard.readText();
           view.dispatch(view.state.replaceSelection(text), { userEvent: 'input.paste' });
         },
       },
-      { label: 'すべて選択', shortcut: 'Ctrl+A', action: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
+      { label: tr('すべて選択', 'Select all', '全选'), shortcut: 'Ctrl+A', action: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
       { label: '', separator: true },
     ] as { label: string; shortcut?: string; disabled?: boolean; separator?: boolean; action?: () => void }[];
     const tools = store.aiTools.filter((t) => t.found);
     for (const t of tools) {
       for (const a of t.actions) items.push({ label: `${t.name}: ${a.label}`, action: () => void store.launchTool(t, a.id) });
     }
-    if (tools.length === 0) items.push({ label: 'AI ツールが見つかりません', disabled: true });
+    if (tools.length === 0) items.push({ label: tr('AI ツールが見つかりません', 'No AI tools found', '未找到 AI 工具'), disabled: true });
     store.openMenu(e, items);
     view.focus();
   }

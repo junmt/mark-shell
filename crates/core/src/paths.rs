@@ -74,9 +74,14 @@ pub fn normalize_rel(rel: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
+/// 「不正なパスです」のエラー
+pub fn invalid_path() -> String {
+    crate::tr!("不正なパスです", "Invalid path", "路径无效")
+}
+
 /// ルートからの相対パスを絶対パスに解決する。ルートの外は拒否する
 pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
-    let norm = normalize_rel(rel).ok_or_else(|| format!("不正なパスです: {rel}"))?;
+    let norm = normalize_rel(rel).ok_or_else(|| crate::tr!("不正なパスです: {rel}", "Invalid path: {rel}", "路径无效：{rel}"))?;
     let mut p = root.to_path_buf();
     for part in norm.split('/').filter(|s| !s.is_empty()) {
         p.push(part);

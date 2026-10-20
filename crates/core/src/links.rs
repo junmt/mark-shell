@@ -127,8 +127,8 @@ fn rewrite(text: &str, old_self: &str, new_self: &str, mv: &Move, renamed_stem: 
 /// `from` を `to` に動かしたときのリンク書き換え。`apply` が false なら数えるだけ。
 /// `apply` が true のときは既に動かした後で呼ぶ
 pub fn plan(root: &Path, filter: &Arc<FilterConfig>, from: &str, to: &str, apply: bool) -> Result<Plan, String> {
-    let from = normalize_rel(from).ok_or("不正なパスです")?;
-    let to = normalize_rel(to).ok_or("不正なパスです")?;
+    let from = normalize_rel(from).ok_or_else(crate::paths::invalid_path)?;
+    let to = normalize_rel(to).ok_or_else(crate::paths::invalid_path)?;
     let current = if apply { &to } else { &from };
     let dir = resolve(root, current)?.is_dir();
     let mv = Move { from: from.clone(), to: to.clone(), dir };
@@ -179,7 +179,11 @@ pub fn plan(root: &Path, filter: &Arc<FilterConfig>, from: &str, to: &str, apply
         })
     });
     if let Some(err) = error.into_inner().unwrap() {
-        return Err(format!("一部のリンクを書き換えられませんでした: {err}"));
+        return Err(crate::tr!(
+            "一部のリンクを書き換えられませんでした: {err}",
+            "Some links could not be updated: {err}",
+            "部分链接未能更新：{err}"
+        ));
     }
     Ok(result.into_inner().unwrap())
 }

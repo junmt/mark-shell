@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+use markshell_core::tr;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -69,7 +70,14 @@ fn write_selection_file(text: &str) -> Result<std::path::PathBuf, String> {
 /// ログインシェルで起動して PATH などをそろえ、ツールが終わったらそのままシェルに戻る
 fn wsl_tool_command(w: &WslRoot, tool: &ai_tools::ToolDef, action: Option<&str>, note: Option<&str>, selection_file: Option<&Path>) -> Result<CommandBuilder, String> {
     let exe = ai_tools::find_in_wsl(tool, w)
-        .ok_or_else(|| format!("{} が WSL（{}）に見つかりません。WSL の中にインストールされているか確認してください", tool.name, w.distro))?;
+        .ok_or_else(|| {
+            let (name, distro) = (&tool.name, &w.distro);
+            tr!(
+                "{name} が WSL（{distro}）に見つかりません。WSL の中にインストールされているか確認してください",
+                "{name} was not found in WSL ({distro}). Check that it is installed inside WSL",
+                "在 WSL（{distro}）中找不到 {name}。请确认它已安装在 WSL 中"
+            )
+        })?;
     let mut map = HashMap::new();
     map.insert("root", w.linux_root.clone());
     if let Some(n) = note {
@@ -138,7 +146,8 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
                 } else {
                     // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
                     // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
-                    let ps = shells::powershell().ok_or("PowerShell が見つかりません")?;
+                    let ps = shells::powershell()
+                        .ok_or_else(|| tr!("PowerShell が見つかりません", "PowerShell was not found", "找不到 PowerShell"))?;
                     let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
                         .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
                         .collect::<Vec<_>>()
@@ -152,7 +161,8 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
             }
         }
     } else {
-        let sh = shells::find(req.shell_id.as_deref()).ok_or("使えるシェルが見つかりません")?;
+        let sh = shells::find(req.shell_id.as_deref())
+            .ok_or_else(|| tr!("使えるシェルが見つかりません", "No usable shell was found", "找不到可用的 Shell"))?;
         let mut c = CommandBuilder::new(&sh.program);
         c.args(&sh.args);
         // 開いている WSL のフォルダと同じディストリビューションのシェルなら、Linux のパスに移動する
@@ -163,7 +173,7 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
             c.args(["--cd", &cwd.to_string_lossy()]);
         }
         c.cwd(&cwd);
-        (c, sh.name.clone(), same.is_some())
+        (c, sh.display_name(), same.is_some())
     };
 
     match (&wsl, in_wsl) {
@@ -192,7 +202,7 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     let pair = native_pty_system()
         .openpty(PtySize { rows: req.rows.max(2), cols: req.cols.max(10), pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
-    let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("起動できません: {e}"))?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| tr!("起動できません: {e}", "Cannot start: {e}", "无法启动：{e}"))?;
     drop(pair.slave);
     let killer = child.clone_killer();
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -253,7 +263,9 @@ const PS_INIT: &str = "[Console]::OutputEncoding=[Console]::InputEncoding=[Syste
 #[tauri::command]
 pub fn pty_write(state: State<'_, AppState>, id: u32, data: String) -> Result<(), String> {
     let mut ptys = state.ptys.lock().unwrap();
-    let s = ptys.get_mut(&id).ok_or("ターミナルは終了しています")?;
+    let s = ptys
+        .get_mut(&id)
+        .ok_or_else(|| tr!("ターミナルは終了しています", "The terminal has exited", "终端已退出"))?;
     s.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
     s.writer.flush().map_err(|e| e.to_string())
 }

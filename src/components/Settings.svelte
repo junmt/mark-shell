@@ -4,7 +4,12 @@
   import { store } from '../lib/store.svelte';
   import { api, errorMessage } from '../lib/api';
   import { EDITOR_FONT, TERMINAL_FONT, type Config } from '../lib/config';
-  import { COLOR_KEYS, COLOR_LABELS, DEFAULT_FONTS, FONT_SUGGESTIONS, PRESETS, fontStack, presetFor, resolveTheme, type ColorKey } from '../lib/themes';
+  import { COLOR_KEYS, DEFAULT_FONTS, FONT_SUGGESTIONS, PRESETS, colorLabel, fontStack, presetFor, presetLabel, resolveTheme, type ColorKey } from '../lib/themes';
+  import { LANGUAGE_LABELS, tr, type LanguageSetting } from '../lib/i18n.svelte';
+
+  const languages = Object.entries(LANGUAGE_LABELS) as [LanguageSetting, string][];
+  /** フォントの見本（CJK の字形が分かるように漢字を入れる） */
+  const fontSample = $derived(tr('あいうえお 漢字 ABC abc 123', 'あいうえお 漢字 ABC abc 123', '中文 汉字 ABC abc 123'));
 
   let draft = $state<Config | null>(null);
   /** 編集中の配色（見本の表示と、色の入力欄の初期値に使う） */
@@ -51,7 +56,11 @@
     try {
       await api.registerExplorerMenu(!explorerMenu);
       explorerMenu = !explorerMenu;
-      store.toast(explorerMenu ? 'エクスプローラーの右クリックメニューに「mark-shell で開く」を追加しました' : '右クリックメニューから外しました');
+      store.toast(
+        explorerMenu
+          ? tr('エクスプローラーの右クリックメニューに「mark-shell で開く」を追加しました', 'Added "Open with mark-shell" to the Explorer context menu', '已将“用 mark-shell 打开”添加到资源管理器右键菜单')
+          : tr('右クリックメニューから外しました', 'Removed from the context menu', '已从右键菜单中移除'),
+      );
     } catch (e) {
       store.toast(errorMessage(e), 'error');
     }
@@ -71,25 +80,43 @@
 
 {#if store.settingsOpen && draft}
   <div class="backdrop" role="presentation" onclick={() => (store.settingsOpen = false)}></div>
-  <div class="dialog" role="dialog" aria-modal="true" aria-label="設定">
-    <h2>設定</h2>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label={tr('設定', 'Settings', '设置')}>
+    <h2>{tr('設定', 'Settings', '设置')}</h2>
     <div class="body">
       <section>
-        <h3>配色</h3>
-        <label>配色
-          <select bind:value={draft.theme} onchange={onThemeChange}>
-            <option value="system">Windows の設定に合わせる（ライト / ダーク）</option>
-            {#each Object.entries(PRESETS) as [id, p] (id)}
-              <option value={id}>{p.label}</option>
+        <h3>{tr('言語', 'Language', '语言')}</h3>
+        <label>{tr('表示言語', 'Display language', '显示语言')}
+          <select bind:value={draft.language}>
+            {#each languages as [id, name] (id)}
+              <option value={id}>{name}</option>
             {/each}
-            <option value="custom">カスタム</option>
+          </select>
+        </label>
+        <p class="note">
+          {tr(
+            '「System」は PC の言語に合わせます。対応していない言語のときは英語で表示します。',
+            '"System" follows the PC language. Unsupported languages fall back to English.',
+            '“System”会跟随电脑的语言。不支持的语言将显示为英语。',
+          )}
+        </p>
+      </section>
+
+      <section>
+        <h3>{tr('配色', 'Colors', '配色')}</h3>
+        <label>{tr('配色', 'Color theme', '配色方案')}
+          <select bind:value={draft.theme} onchange={onThemeChange}>
+            <option value="system">{tr('Windows の設定に合わせる（ライト / ダーク）', 'Match Windows (light / dark)', '跟随 Windows 设置（浅色 / 深色）')}</option>
+            {#each Object.keys(PRESETS) as id (id)}
+              <option value={id}>{presetLabel(id)}</option>
+            {/each}
+            <option value="custom">{tr('カスタム', 'Custom', '自定义')}</option>
           </select>
         </label>
         {#if draft.theme === 'custom' && sample}
-          <label>元にする配色
+          <label>{tr('元にする配色', 'Base theme', '基础配色')}
             <select bind:value={draft.customColors.base}>
-              {#each Object.entries(PRESETS) as [id, p] (id)}
-                <option value={id}>{p.label}</option>
+              {#each Object.keys(PRESETS) as id (id)}
+                <option value={id}>{presetLabel(id)}</option>
               {/each}
             </select>
           </label>
@@ -98,28 +125,30 @@
               <div class="color">
                 <label>
                   <input type="color" value={sample.colors[k]} oninput={(e) => setColor(k, e.currentTarget.value)} />
-                  <span>{COLOR_LABELS[k]}</span>
+                  <span>{colorLabel(k)}</span>
                 </label>
                 {#if draft.customColors.colors[k]}
-                  <button class="link" onclick={() => resetColor(k)}>元に戻す</button>
+                  <button class="link" onclick={() => resetColor(k)}>{tr('元に戻す', 'Reset', '还原')}</button>
                 {/if}
               </div>
             {/each}
           </div>
           <div class="row">
-            <button class="btn" onclick={() => draft && (draft.customColors.colors = {})}>すべて元の配色に戻す</button>
+            <button class="btn" onclick={() => draft && (draft.customColors.colors = {})}>{tr('すべて元の配色に戻す', 'Reset all colors', '全部还原为基础配色')}</button>
           </div>
         {/if}
         {#if sample}
           <!-- 見本。保存すると画面全体に反映する -->
           <div class="swatch" style:background={sample.colors.bg} style:color={sample.colors.fg} style:border-color={sample.colors.border}>
             <div class="swatch-pane" style:background={sample.colors.bgPane} style:color={sample.colors.fgMuted} style:border-color={sample.colors.border}>
-              📁 メモ<br />　memo.md
+              📁 {tr('メモ', 'Notes', '笔记')}<br />　memo.md
             </div>
             <div class="swatch-body">
-              <div style:color={sample.colors.mdHeading} class="swatch-heading">見出し</div>
-              <div>本文の文字と<span style:color={sample.colors.mdLink}>リンク</span>と<code style:color={sample.colors.mdCode}>コード</code></div>
-              <span class="swatch-btn" style:background={sample.colors.accent} style:color={sample.vars['accent-fg']}>ボタン</span>
+              <div style:color={sample.colors.mdHeading} class="swatch-heading">{tr('見出し', 'Heading', '标题')}</div>
+              <div>
+                {tr('本文の文字と', 'Body text, ', '正文文字、')}<span style:color={sample.colors.mdLink}>{tr('リンク', 'a link', '链接')}</span>{tr('と', ' and ', '和')}<code style:color={sample.colors.mdCode}>{tr('コード', 'code', '代码')}</code>
+              </div>
+              <span class="swatch-btn" style:background={sample.colors.accent} style:color={sample.vars['accent-fg']}>{tr('ボタン', 'Button', '按钮')}</span>
             </div>
             <div class="swatch-term" style:background={sample.colors.terminalBg} style:color={sample.colors.terminalFg}>$ claude</div>
           </div>
@@ -127,104 +156,116 @@
       </section>
 
       <section>
-        <h3>表示</h3>
+        <h3>{tr('表示', 'Display', '显示')}</h3>
         <datalist id="fonts-proportional">
           {#each FONT_SUGGESTIONS.proportional as f (f)}<option value={f}></option>{/each}
         </datalist>
         <datalist id="fonts-mono">
           {#each FONT_SUGGESTIONS.mono as f (f)}<option value={f}></option>{/each}
         </datalist>
-        <label>画面全体（メニュー・ツリー・タブ）のフォント
-          <input list="fonts-proportional" bind:value={draft.uiFontFamily} placeholder="既定（Segoe UI, Yu Gothic UI）" />
-          <span class="font-sample" style:font-family={fontStack(draft.uiFontFamily, DEFAULT_FONTS.ui)}>あいうえお 漢字 ABC abc 123</span>
+        <label>{tr('画面全体（メニュー・ツリー・タブ）のフォント', 'UI font (menus, tree, tabs)', '界面字体（菜单、文件树、标签页）')}
+          <input list="fonts-proportional" bind:value={draft.uiFontFamily} placeholder={tr('既定（Segoe UI, Yu Gothic UI）', 'Default (Segoe UI, Yu Gothic UI)', '默认（Segoe UI, Yu Gothic UI）')} />
+          <span class="font-sample" style:font-family={fontStack(draft.uiFontFamily, DEFAULT_FONTS.ui)}>{fontSample}</span>
         </label>
-        <label>エディタの文字の大きさ（Ctrl+ホイールでも変えられます） <input type="number" min="8" max="40" bind:value={draft.editorFontSize} /></label>
-        <label>エディタのフォント
-          <input list="fonts-mono" bind:value={draft.editorFontFamily} placeholder="既定（Cascadia Mono, BIZ UDGothic）" />
-          <span class="font-sample" style:font-family={fontStack(draft.editorFontFamily, EDITOR_FONT)}>あいうえお 漢字 ABC abc 123 {'{}'} =&gt;</span>
+        <label>{tr('エディタの文字の大きさ（Ctrl+ホイールでも変えられます）', 'Editor font size (also Ctrl+wheel)', '编辑器字号（也可用 Ctrl+滚轮调整）')} <input type="number" min="8" max="40" bind:value={draft.editorFontSize} /></label>
+        <label>{tr('エディタのフォント', 'Editor font', '编辑器字体')}
+          <input list="fonts-mono" bind:value={draft.editorFontFamily} placeholder={tr('既定（Cascadia Mono, BIZ UDGothic）', 'Default (Cascadia Mono, BIZ UDGothic)', '默认（Cascadia Mono, BIZ UDGothic）')} />
+          <span class="font-sample" style:font-family={fontStack(draft.editorFontFamily, EDITOR_FONT)}>{fontSample} {'{}'} =&gt;</span>
         </label>
-        <label>プレビューの文字の大きさ <input type="number" min="8" max="40" bind:value={draft.previewFontSize} /></label>
-        <label>プレビューのフォント
-          <input list="fonts-proportional" bind:value={draft.previewFontFamily} placeholder="既定（Segoe UI, Yu Gothic UI, Meiryo）" />
-          <span class="font-sample" style:font-family={fontStack(draft.previewFontFamily, DEFAULT_FONTS.preview)}>あいうえお 漢字 ABC abc 123</span>
+        <label>{tr('プレビューの文字の大きさ', 'Preview font size', '预览字号')} <input type="number" min="8" max="40" bind:value={draft.previewFontSize} /></label>
+        <label>{tr('プレビューのフォント', 'Preview font', '预览字体')}
+          <input list="fonts-proportional" bind:value={draft.previewFontFamily} placeholder={tr('既定（Segoe UI, Yu Gothic UI, Meiryo）', 'Default (Segoe UI, Yu Gothic UI, Meiryo)', '默认（Segoe UI, Yu Gothic UI, Meiryo）')} />
+          <span class="font-sample" style:font-family={fontStack(draft.previewFontFamily, DEFAULT_FONTS.preview)}>{fontSample}</span>
         </label>
-        <label class="check"><input type="checkbox" bind:checked={draft.lineNumbers} /> 行番号を表示する</label>
-        <label class="check"><input type="checkbox" bind:checked={draft.lineWrapping} /> 長い行を折り返す</label>
-        <label>外部の画像
+        <label class="check"><input type="checkbox" bind:checked={draft.lineNumbers} /> {tr('行番号を表示する', 'Show line numbers', '显示行号')}</label>
+        <label class="check"><input type="checkbox" bind:checked={draft.lineWrapping} /> {tr('長い行を折り返す', 'Wrap long lines', '自动换行')}</label>
+        <label>{tr('外部の画像', 'External images', '外部图片')}
           <select bind:value={draft.externalImages}>
-            <option value="click">クリックしたときだけ読み込む</option>
-            <option value="always">常に読み込む</option>
+            <option value="click">{tr('クリックしたときだけ読み込む', 'Load only when clicked', '仅在点击时加载')}</option>
+            <option value="always">{tr('常に読み込む', 'Always load', '始终加载')}</option>
           </select>
         </label>
       </section>
 
       <section>
-        <h3>編集</h3>
-        <label>自動保存までの時間（ミリ秒。0 で自動保存しない） <input type="number" min="0" step="100" bind:value={draft.autosaveDelay} /></label>
-        <label>貼り付けた画像の保存先（ファイルと同じ場所からのフォルダ名） <input bind:value={draft.imageFolder} /></label>
+        <h3>{tr('編集', 'Editing', '编辑')}</h3>
+        <label>{tr('自動保存までの時間（ミリ秒。0 で自動保存しない）', 'Autosave delay (ms; 0 disables autosave)', '自动保存延迟（毫秒；0 表示不自动保存）')} <input type="number" min="0" step="100" bind:value={draft.autosaveDelay} /></label>
+        <label>{tr('貼り付けた画像の保存先（ファイルと同じ場所からのフォルダ名）', 'Folder for pasted images (relative to the file)', '粘贴图片的保存位置（相对于文件所在位置的文件夹名）')} <input bind:value={draft.imageFolder} /></label>
       </section>
 
       <section>
-        <h3>ファイルツリー</h3>
-        <label>Markdown として扱う拡張子（カンマ区切り。ほかのファイルもツリーに出し、テキストならプレビューなしで編集できる） <input bind:value={extText} /></label>
-        <label class="check"><input type="checkbox" bind:checked={draft.followSymlinks} /> シンボリックリンク・ジャンクションをたどる</label>
-        <label>並び順
+        <h3>{tr('ファイルツリー', 'File tree', '文件树')}</h3>
+        <label>{tr(
+            'Markdown として扱う拡張子（カンマ区切り。ほかのファイルもツリーに出し、テキストならプレビューなしで編集できる）',
+            'Markdown file extensions (comma-separated; other files still appear in the tree and text files can be edited without preview)',
+            '视为 Markdown 的扩展名（逗号分隔；其他文件也会显示在文件树中，文本文件可在无预览的情况下编辑）',
+          )} <input bind:value={extText} /></label>
+        <label class="check"><input type="checkbox" bind:checked={draft.followSymlinks} /> {tr('シンボリックリンク・ジャンクションをたどる', 'Follow symbolic links and junctions', '跟随符号链接和目录联接')}</label>
+        <label>{tr('並び順', 'Sort order', '排序方式')}
           <select bind:value={draft.treeSort}>
-            <option value="name">名前順</option>
-            <option value="mtime">更新日時が新しい順</option>
+            <option value="name">{tr('名前順', 'Name', '按名称')}</option>
+            <option value="mtime">{tr('更新日時が新しい順', 'Last modified (newest first)', '按修改时间（最新优先）')}</option>
           </select>
         </label>
       </section>
 
       <section>
-        <h3>ターミナル</h3>
-        <label>既定のシェル
+        <h3>{tr('ターミナル', 'Terminal', '终端')}</h3>
+        <label>{tr('既定のシェル', 'Default shell', '默认 Shell')}
           <select bind:value={draft.terminal.defaultShell}>
-            <option value="">自動（PowerShell）</option>
+            <option value="">{tr('自動（PowerShell）', 'Auto (PowerShell)', '自动（PowerShell）')}</option>
             {#each store.shells as s (s.id)}
               <option value={s.id}>{s.name}</option>
             {/each}
           </select>
         </label>
-        <label>開いたときの作業フォルダ
+        <label>{tr('開いたときの作業フォルダ', 'Starting directory', '启动时的工作目录')}
           <select bind:value={draft.terminal.cwd}>
-            <option value="root">開いているフォルダのルート</option>
-            <option value="noteDir">編集中のファイルがあるフォルダ</option>
+            <option value="root">{tr('開いているフォルダのルート', 'Root of the open folder', '已打开文件夹的根目录')}</option>
+            <option value="noteDir">{tr('編集中のファイルがあるフォルダ', 'Folder of the file being edited', '正在编辑的文件所在的文件夹')}</option>
           </select>
         </label>
-        <label>文字の大きさ <input type="number" min="8" max="32" bind:value={draft.terminal.fontSize} /></label>
-        <label>フォント
-          <input list="fonts-mono" bind:value={draft.terminal.fontFamily} placeholder="既定（Cascadia Mono, BIZ UDGothic）" />
-          <span class="font-sample" style:font-family={fontStack(draft.terminal.fontFamily, TERMINAL_FONT)}>あいうえお 漢字 ABC abc 123 $ ls -la</span>
+        <label>{tr('文字の大きさ', 'Font size', '字号')} <input type="number" min="8" max="32" bind:value={draft.terminal.fontSize} /></label>
+        <label>{tr('フォント', 'Font', '字体')}
+          <input list="fonts-mono" bind:value={draft.terminal.fontFamily} placeholder={tr('既定（Cascadia Mono, BIZ UDGothic）', 'Default (Cascadia Mono, BIZ UDGothic)', '默认（Cascadia Mono, BIZ UDGothic）')} />
+          <span class="font-sample" style:font-family={fontStack(draft.terminal.fontFamily, TERMINAL_FONT)}>{fontSample} $ ls -la</span>
         </label>
-        <label class="check"><input type="checkbox" bind:checked={draft.terminal.copyOnSelect} /> 選択したらコピーする</label>
+        <label class="check"><input type="checkbox" bind:checked={draft.terminal.copyOnSelect} /> {tr('選択したらコピーする', 'Copy on select', '选中即复制')}</label>
       </section>
 
       <section>
-        <h3>AI ツールと Windows</h3>
-        <p class="note">AI ツールの定義（コマンド名・起動方法・メニュー）は設定ファイルで追加・変更できます。</p>
+        <h3>{tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
+        <p class="note">
+          {tr(
+            'AI ツールの定義（コマンド名・起動方法・メニュー）は設定ファイルで追加・変更できます。',
+            'AI tool definitions (command names, launch methods, menus) can be added or changed in a config file.',
+            'AI 工具的定义（命令名、启动方式、菜单）可以在配置文件中添加或修改。',
+          )}
+        </p>
         <div class="row">
-          <button class="btn" onclick={openAiToolsFile}>AI ツールの定義ファイルを開く</button>
-          <button class="btn" onclick={() => void store.refreshAiTools()}>AI ツールを探し直す</button>
+          <button class="btn" onclick={openAiToolsFile}>{tr('AI ツールの定義ファイルを開く', 'Open AI tools config file', '打开 AI 工具定义文件')}</button>
+          <button class="btn" onclick={() => void store.refreshAiTools()}>{tr('AI ツールを探し直す', 'Rescan AI tools', '重新查找 AI 工具')}</button>
         </div>
         <div class="row">
           <button class="btn" onclick={toggleExplorerMenu}>
-            {explorerMenu ? 'エクスプローラーの右クリックメニューから外す' : 'エクスプローラーの右クリックメニューに追加'}
+            {explorerMenu
+              ? tr('エクスプローラーの右クリックメニューから外す', 'Remove from Explorer context menu', '从资源管理器右键菜单中移除')
+              : tr('エクスプローラーの右クリックメニューに追加', 'Add to Explorer context menu', '添加到资源管理器右键菜单')}
           </button>
         </div>
       </section>
 
       <section>
-        <h3>アップデート</h3>
-        <label class="check"><input type="checkbox" bind:checked={draft.checkUpdates} /> 起動時に新しいバージョンがあるか確認する</label>
+        <h3>{tr('アップデート', 'Updates', '更新')}</h3>
+        <label class="check"><input type="checkbox" bind:checked={draft.checkUpdates} /> {tr('起動時に新しいバージョンがあるか確認する', 'Check for updates on startup', '启动时检查新版本')}</label>
         <div class="row">
-          <button class="btn" onclick={() => void store.checkForUpdate(true)}>いま確認する</button>
+          <button class="btn" onclick={() => void store.checkForUpdate(true)}>{tr('いま確認する', 'Check now', '立即检查')}</button>
         </div>
       </section>
     </div>
     <div class="buttons">
-      <button class="btn" onclick={() => (store.settingsOpen = false)}>キャンセル</button>
-      <button class="btn primary" onclick={save}>保存</button>
+      <button class="btn" onclick={() => (store.settingsOpen = false)}>{tr('キャンセル', 'Cancel', '取消')}</button>
+      <button class="btn primary" onclick={save}>{tr('保存', 'Save', '保存')}</button>
     </div>
   </div>
 {/if}

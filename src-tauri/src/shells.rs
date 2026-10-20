@@ -17,6 +17,17 @@ pub struct ShellInfo {
     pub wsl: bool,
 }
 
+impl ShellInfo {
+    /// 今の言語での表示名
+    pub fn display_name(&self) -> String {
+        if self.id == "cmd" {
+            markshell_core::tr!("コマンドプロンプト", "Command Prompt", "命令提示符")
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
 static SHELLS: OnceLock<Vec<ShellInfo>> = OnceLock::new();
 
 fn sys_root() -> PathBuf {
@@ -48,7 +59,8 @@ fn detect() -> Vec<ShellInfo> {
     }
     let cmd = std::env::var("ComSpec").map(PathBuf::from).unwrap_or_else(|_| sys_root().join(r"System32\cmd.exe"));
     if cmd.exists() {
-        out.push(shell("cmd", "コマンドプロンプト", cmd, &["/k", "chcp 65001 >nul"]));
+        // 表示名は言語に合わせて display_name で決める（検出は言語の設定より前に行われることがある）
+        out.push(shell("cmd", "Command Prompt", cmd, &["/k", "chcp 65001 >nul"]));
     }
     let mut bash_candidates = vec![];
     if let Ok(git) = which::which("git") {
@@ -108,5 +120,12 @@ pub fn powershell() -> Option<&'static ShellInfo> {
 
 #[tauri::command]
 pub async fn list_shells() -> Vec<ShellInfo> {
-    tauri::async_runtime::spawn_blocking(|| all().to_vec()).await.unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(|| {
+        all()
+            .iter()
+            .map(|s| ShellInfo { name: s.display_name(), ..s.clone() })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }

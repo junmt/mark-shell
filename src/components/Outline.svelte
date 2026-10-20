@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
   import { headings } from '../lib/markdown';
+  import { tr } from '../lib/i18n.svelte';
 
   const doc = $derived(store.activeDoc);
   const markdown = $derived(!!doc && store.isMarkdown(doc.path));
@@ -10,11 +11,11 @@
 
 <div class="outline">
   {#if !doc}
-    <div class="empty">ファイルを開くと見出しの一覧が出ます。</div>
+    <div class="empty">{tr('ファイルを開くと見出しの一覧が出ます。', 'Open a file to see its headings.', '打开文件后将显示标题列表。')}</div>
   {:else if !markdown}
-    <div class="empty">Markdown ではないファイルには見出しの一覧がありません。</div>
+    <div class="empty">{tr('Markdown ではないファイルには見出しの一覧がありません。', 'Only Markdown files have a heading list.', '非 Markdown 文件没有标题列表。')}</div>
   {:else if items.length === 0}
-    <div class="empty">見出しがありません。</div>
+    <div class="empty">{tr('見出しがありません。', 'No headings.', '没有标题。')}</div>
   {:else}
     {#each items as h (h.line)}
       <button

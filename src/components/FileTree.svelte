@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
+  import { tr } from '../lib/i18n.svelte';
   import { basename, dirname, isInside, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
 
@@ -35,27 +36,27 @@
   function menuFor(node: TreeNode | null): MenuItem[] {
     const dir = node ? (node.dir ? node.path : dirname(node.path)) : '';
     const items: MenuItem[] = [
-      { label: '新しいファイル', shortcut: 'Ctrl+N', action: () => void store.newFile(dir) },
-      { label: '新しいフォルダ', action: () => void store.newFolder(dir) },
+      { label: tr('新しいファイル', 'New file', '新建文件'), shortcut: 'Ctrl+N', action: () => void store.newFile(dir) },
+      { label: tr('新しいフォルダ', 'New folder', '新建文件夹'), action: () => void store.newFolder(dir) },
     ];
     if (node) {
       items.push(
         { label: '', separator: true },
-        { label: '名前の変更', shortcut: 'F2', action: () => void store.rename(node.path) },
-        { label: '複製', action: () => void store.duplicate(node.path) },
-        { label: '削除', shortcut: 'Delete', action: () => void store.remove(node.path) },
+        { label: tr('名前の変更', 'Rename', '重命名'), shortcut: 'F2', action: () => void store.rename(node.path) },
+        { label: tr('複製', 'Duplicate', '创建副本'), action: () => void store.duplicate(node.path) },
+        { label: tr('削除', 'Delete', '删除'), shortcut: 'Delete', action: () => void store.remove(node.path) },
         { label: '', separator: true },
-        { label: 'パスをコピー', action: () => void store.copyPath(node.path, false) },
-        { label: '相対パスをコピー', action: () => void store.copyPath(node.path, true) },
+        { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(node.path, false) },
+        { label: tr('相対パスをコピー', 'Copy relative path', '复制相对路径'), action: () => void store.copyPath(node.path, true) },
       );
-      if (!node.dir) items.push({ label: '新しいタブで開く', action: () => void store.openFile(node.path, { pin: true }) });
+      if (!node.dir) items.push({ label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'), action: () => void store.openFile(node.path, { pin: true }) });
     }
     items.push(
       { label: '', separator: true },
-      { label: 'エクスプローラーで表示', action: () => void api.revealInExplorer(node?.path ?? '') },
-      { label: 'ここでターミナルを開く', action: () => store.newTerminal({ cwd: dir }) },
+      { label: tr('エクスプローラーで表示', 'Reveal in Explorer', '在资源管理器中显示'), action: () => void api.revealInExplorer(node?.path ?? '') },
+      { label: tr('ここでターミナルを開く', 'Open terminal here', '在此处打开终端'), action: () => store.newTerminal({ cwd: dir }) },
       { label: '', separator: true },
-      { label: 'フォルダを読み込み直す', action: () => void store.rescan() },
+      { label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), action: () => void store.rescan() },
     );
     return items;
   }
@@ -165,11 +166,11 @@
   role="tree"
 >
   {#if store.scanning && visible.total === 0}
-    <div class="empty">読み込み中…</div>
+    <div class="empty">{tr('読み込み中…', 'Loading…', '正在加载…')}</div>
   {:else if visible.total === 0}
     <div class="empty">
-      Markdown ファイルがありません。
-      <button class="link" onclick={() => void store.newFile('')}>新しいファイルを作る</button>
+      {tr('Markdown ファイルがありません。', 'No Markdown files.', '没有 Markdown 文件。')}
+      <button class="link" onclick={() => void store.newFile('')}>{tr('新しいファイルを作る', 'Create a new file', '新建文件')}</button>
     </div>
   {/if}
   <div class="spacer" style:height="{visible.total * ROW}px">
@@ -197,14 +198,14 @@
         <span class="twisty">{node.dir ? (store.expanded.has(node.path) ? '▾' : '▸') : ''}</span>
         <span class="icon">{node.dir ? '📁' : '📄'}</span>
         <span class="name">{node.name}</span>
-        {#if store.aiChanged.has(node.path)}<span class="badge" title="AI セッション中に変更されました">AI</span>{/if}
+        {#if store.aiChanged.has(node.path)}<span class="badge" title={tr('AI セッション中に変更されました', 'Changed during an AI session', '在 AI 会话中被修改')}>AI</span>{/if}
         {#if store.docs.find((d) => d.path === node.path)?.dirty}<span class="dot">●</span>{/if}
       </div>
     {/each}
   </div>
 </div>
 {#if store.scanning && visible.total > 0}
-  <div class="status">読み込み中… {store.entries.size.toLocaleString()} 件</div>
+  <div class="status">{tr(`読み込み中… ${store.entries.size.toLocaleString()} 件`, `Loading… ${store.entries.size.toLocaleString()} items`, `正在加载… ${store.entries.size.toLocaleString()} 项`)}</div>
 {/if}
 
 <style>

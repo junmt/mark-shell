@@ -3,6 +3,7 @@
   import { store, type Doc, type Mode } from '../lib/store.svelte';
   import Editor from './Editor.svelte';
   import Preview from './Preview.svelte';
+  import { tr } from '../lib/i18n.svelte';
 
   let { doc: docProp }: { doc: Doc } = $props();
 
@@ -10,11 +11,11 @@
   // プロパティのままだと、切り替えの途中で新しいタブのファイルを指してしまう
   const doc = untrack(() => docProp);
 
-  const modes: { id: Mode; label: string }[] = [
-    { id: 'edit', label: '編集' },
-    { id: 'split', label: '分割' },
-    { id: 'preview', label: 'プレビュー' },
-  ];
+  const modes: { id: Mode; label: string }[] = $derived([
+    { id: 'edit', label: tr('編集', 'Edit', '编辑') },
+    { id: 'split', label: tr('分割', 'Split', '分屏') },
+    { id: 'preview', label: tr('プレビュー', 'Preview', '预览') },
+  ]);
 
   // Markdown 以外（ログなどのテキストファイル）はプレビューがないので編集だけ
   const markdown = $derived(store.isMarkdown(doc.path));
@@ -51,29 +52,29 @@
 <div class="doc">
   <div class="bar">
     {#if markdown}
-      <div class="modes" role="radiogroup" aria-label="表示モード">
+      <div class="modes" role="radiogroup" aria-label={tr('表示モード', 'View mode', '视图模式')}>
         {#each modes as m (m.id)}
-          <button class:on={doc.mode === m.id} role="radio" aria-checked={doc.mode === m.id} onclick={() => setMode(m.id)} title="Ctrl+Shift+V で切り替え">
+          <button class:on={doc.mode === m.id} role="radio" aria-checked={doc.mode === m.id} onclick={() => setMode(m.id)} title={tr('Ctrl+Shift+V で切り替え', 'Ctrl+Shift+V to switch', '按 Ctrl+Shift+V 切换')}>
             {m.label}
           </button>
         {/each}
       </div>
     {/if}
     <span class="path" title={doc.path}>{doc.path}</span>
-    {#if doc.readonly}<span class="tag">読み取り専用</span>{/if}
+    {#if doc.readonly}<span class="tag">{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
   </div>
 
   {#if doc.deleted}
-    <div class="banner warn">このファイルは削除されました。保存すると作り直します。
-      <button class="btn" onclick={() => void store.save(doc, true)}>保存して作り直す</button>
-      <button class="btn" onclick={() => void store.closeTab(doc.path)}>タブを閉じる</button>
+    <div class="banner warn">{tr('このファイルは削除されました。保存すると作り直します。', 'This file was deleted. Saving will recreate it.', '此文件已被删除。保存后将重新创建。')}
+      <button class="btn" onclick={() => void store.save(doc, true)}>{tr('保存して作り直す', 'Save to recreate', '保存并重新创建')}</button>
+      <button class="btn" onclick={() => void store.closeTab(doc.path)}>{tr('タブを閉じる', 'Close tab', '关闭标签页')}</button>
     </div>
   {/if}
   {#if store.aiBefore.has(doc.path)}
-    <div class="banner ai">✦ AI セッション中にこのファイルが変更されました。
-      <button class="btn" onclick={() => store.showAiDiff(doc)}>差分を見る</button>
-      <button class="btn" onclick={() => void store.revertAiChange(doc)}>変更前に戻す</button>
-      <button class="btn" onclick={() => store.dismissAiChange(doc.path)}>閉じる</button>
+    <div class="banner ai">✦ {tr('AI セッション中にこのファイルが変更されました。', 'This file was changed during an AI session.', '此文件在 AI 会话中被修改。')}
+      <button class="btn" onclick={() => store.showAiDiff(doc)}>{tr('差分を見る', 'View diff', '查看差异')}</button>
+      <button class="btn" onclick={() => void store.revertAiChange(doc)}>{tr('変更前に戻す', 'Revert changes', '还原修改')}</button>
+      <button class="btn" onclick={() => store.dismissAiChange(doc.path)}>{tr('閉じる', 'Dismiss', '关闭')}</button>
     </div>
   {/if}
 

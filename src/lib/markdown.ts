@@ -15,6 +15,7 @@ import YAML from 'yaml';
 import type { Root as MdRoot, Text, PhrasingContent, Blockquote, Paragraph } from 'mdast';
 import type { Root as HRoot, Element, ElementContent } from 'hast';
 import { absToRel, dirname, join, normalize } from './paths';
+import { tr } from './i18n.svelte';
 
 export type RenderContext = {
   root: string;
@@ -167,14 +168,14 @@ function rehypeMarkShell() {
             p.dataSrc = src;
             delete p.src;
             p.className = ['external-image'];
-            p.title = `外部の画像（クリックで読み込み）: ${src}`;
+            p.title = tr(`外部の画像（クリックで読み込み）: ${src}`, `External image (click to load): ${src}`, `外部图片（点击加载）: ${src}`);
           }
         } else if (!/^data:image\//i.test(src)) {
           const rel = resolveLocal(src, ctx.notePath, ctx.root);
           if (rel === null) {
             delete p.src;
             p.className = ['blocked-image'];
-            p.title = 'フォルダの外の画像は表示しません';
+            p.title = tr('フォルダの外の画像は表示しません', 'Images outside the folder are not shown', '不显示文件夹以外的图片');
           } else {
             p.src = mdimgUrl(rel);
           }
@@ -220,7 +221,7 @@ function frontmatterHtml(yaml: string): string {
   try {
     data = YAML.parse(yaml);
   } catch {
-    return `<details class="frontmatter"><summary>フロントマター（解析できません）</summary><pre>${escapeHtml(yaml)}</pre></details>`;
+    return `<details class="frontmatter"><summary>${escapeHtml(tr('フロントマター（解析できません）', 'Front matter (could not parse)', '前置元数据（无法解析）'))}</summary><pre>${escapeHtml(yaml)}</pre></details>`;
   }
   if (!data || typeof data !== 'object') return '';
   const rows = Object.entries(data as Record<string, unknown>)
@@ -229,7 +230,7 @@ function frontmatterHtml(yaml: string): string {
       return `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(val)}</td></tr>`;
     })
     .join('');
-  return `<details class="frontmatter" data-line="1"><summary>フロントマター</summary><table>${rows}</table></details>`;
+  return `<details class="frontmatter" data-line="1"><summary>${escapeHtml(tr('フロントマター', 'Front matter', '前置元数据'))}</summary><table>${rows}</table></details>`;
 }
 
 const PURIFY_CONFIG = {

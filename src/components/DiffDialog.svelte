@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
   import DiffLines from './DiffLines.svelte';
+  import { tr } from '../lib/i18n.svelte';
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && store.diff && (store.diff = null)} />
@@ -10,9 +11,9 @@
   <div class="backdrop" role="presentation" onclick={() => (store.diff = null)}></div>
   <div class="dialog" role="dialog" aria-modal="true" aria-label={d.title}>
     <h2>{d.title}</h2>
-    <DiffLines before={d.before} after={d.after} beforeLabel="変更前" afterLabel="変更後" />
+    <DiffLines before={d.before} after={d.after} beforeLabel={tr('変更前', 'Before', '修改前')} afterLabel={tr('変更後', 'After', '修改后')} />
     <div class="buttons">
-      <button class="btn primary" onclick={() => (store.diff = null)}>閉じる</button>
+      <button class="btn primary" onclick={() => (store.diff = null)}>{tr('閉じる', 'Close', '关闭')}</button>
     </div>
   </div>
 {/if}

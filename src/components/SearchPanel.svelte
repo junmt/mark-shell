@@ -3,6 +3,7 @@
   import { SvelteSet } from 'svelte/reactivity';
   import { store } from '../lib/store.svelte';
   import type { SearchHit } from '../lib/api';
+  import { tr } from '../lib/i18n.svelte';
 
   let input: HTMLInputElement | undefined = $state();
   let replacement = $state('');
@@ -51,35 +52,37 @@
 
 <div class="form">
   <div class="row">
-    <button class="icon-btn" title="置換" onclick={() => (showReplace = !showReplace)}>{showReplace ? '▾' : '▸'}</button>
+    <button class="icon-btn" title={tr('置換', 'Replace', '替换')} onclick={() => (showReplace = !showReplace)}>{showReplace ? '▾' : '▸'}</button>
     <input
       bind:this={input}
       bind:value={store.searchOptions.query}
       oninput={schedule}
       onkeydown={(e) => e.key === 'Enter' && void store.runSearch()}
-      placeholder="検索"
+      placeholder={tr('検索', 'Search', '搜索')}
       spellcheck="false"
     />
   </div>
   <div class="opts">
-    <button class="icon-btn" class:on={store.searchOptions.caseSensitive} title="大文字と小文字を区別" onclick={() => toggle('caseSensitive')}>Aa</button>
-    <button class="icon-btn" class:on={store.searchOptions.wholeWord} title="単語単位" onclick={() => toggle('wholeWord')}>ab|</button>
-    <button class="icon-btn" class:on={store.searchOptions.regex} title="正規表現" onclick={() => toggle('regex')}>.*</button>
-    <input class="folder" bind:value={store.searchOptions.folder} oninput={schedule} placeholder="フォルダで絞り込み" spellcheck="false" />
+    <button class="icon-btn" class:on={store.searchOptions.caseSensitive} title={tr('大文字と小文字を区別', 'Match case', '区分大小写')} onclick={() => toggle('caseSensitive')}>Aa</button>
+    <button class="icon-btn" class:on={store.searchOptions.wholeWord} title={tr('単語単位', 'Match whole word', '全字匹配')} onclick={() => toggle('wholeWord')}>ab|</button>
+    <button class="icon-btn" class:on={store.searchOptions.regex} title={tr('正規表現', 'Use regular expression', '使用正则表达式')} onclick={() => toggle('regex')}>.*</button>
+    <input class="folder" bind:value={store.searchOptions.folder} oninput={schedule} placeholder={tr('フォルダで絞り込み', 'Filter by folder', '按文件夹筛选')} spellcheck="false" />
   </div>
   {#if showReplace}
     <div class="row">
-      <input bind:value={replacement} placeholder="置換後の文字列" spellcheck="false" />
-      <button class="btn" disabled={store.searchHits.length === 0} onclick={() => void store.replaceAll(replacement)}>すべて置換</button>
+      <input bind:value={replacement} placeholder={tr('置換後の文字列', 'Replace with', '替换为')} spellcheck="false" />
+      <button class="btn" disabled={store.searchHits.length === 0} onclick={() => void store.replaceAll(replacement)}>{tr('すべて置換', 'Replace all', '全部替换')}</button>
     </div>
   {/if}
   <div class="summary">
     {#if store.searchError}
       <span class="error">{store.searchError}</span>
     {:else if store.searchRunning}
-      検索中… {store.searchHits.length} 件
+      {tr(`検索中… ${store.searchHits.length} 件`, `Searching… ${store.searchHits.length} results`, `正在搜索… ${store.searchHits.length} 个结果`)}
     {:else if store.searchOptions.query}
-      {groups.length} 個のファイルで {store.searchHits.length} 件{store.searchTruncated ? '（多すぎるため途中まで）' : ''}
+      {tr(`${groups.length} 個のファイルで ${store.searchHits.length} 件`, `${store.searchHits.length} results in ${groups.length} files`, `${groups.length} 个文件中共 ${store.searchHits.length} 个结果`)}{store.searchTruncated
+        ? tr('（多すぎるため途中まで）', ' (too many; showing partial results)', '（结果过多，仅显示部分）')
+        : ''}
     {/if}
   </div>
 </div>

@@ -8,6 +8,7 @@
   import { api, Channel, errorMessage, type PtyEvent } from '../lib/api';
   import { TERMINAL_FONT } from '../lib/config';
   import { store, type TermSession } from '../lib/store.svelte';
+  import { tr } from '../lib/i18n.svelte';
 
   let { session, active }: { session: TermSession; active: boolean } = $props();
 
@@ -131,7 +132,12 @@
       if (ev.type === 'data') term.write(ev.data);
       else {
         session.exited = true;
-        term.write(`\r\n\x1b[90m[プロセスは終了しました${ev.code !== null ? `（コード ${ev.code}）` : ''}]\x1b[0m\r\n`);
+        const code = ev.code;
+        const msg =
+          code !== null
+            ? tr(`プロセスは終了しました（コード ${code}）`, `Process exited (code ${code})`, `进程已退出（代码 ${code}）`)
+            : tr('プロセスは終了しました', 'Process exited', '进程已退出');
+        term.write(`\r\n\x1b[90m[${msg}]\x1b[0m\r\n`);
       }
     };
     term.onData((data) => {
@@ -146,7 +152,8 @@
       })
       .catch((e) => {
         session.exited = true;
-        term.write(`\x1b[31m起動できませんでした: ${errorMessage(e)}\x1b[0m\r\n`);
+        const err = errorMessage(e);
+        term.write(`\x1b[31m${tr(`起動できませんでした: ${err}`, `Failed to start: ${err}`, `无法启动: ${err}`)}\x1b[0m\r\n`);
       });
 
     observer = new ResizeObserver(() => resize());
@@ -182,12 +189,12 @@
 
   function menu(e: MouseEvent) {
     store.openMenu(e, [
-      { label: 'コピー', shortcut: 'Ctrl+C', disabled: !term.hasSelection(), action: () => void copySelection() },
-      { label: '貼り付け', shortcut: 'Ctrl+V', action: () => void paste() },
-      { label: 'すべて選択', action: () => term.selectAll() },
-      { label: 'クリア', action: () => term.clear() },
+      { label: tr('コピー', 'Copy', '复制'), shortcut: 'Ctrl+C', disabled: !term.hasSelection(), action: () => void copySelection() },
+      { label: tr('貼り付け', 'Paste', '粘贴'), shortcut: 'Ctrl+V', action: () => void paste() },
+      { label: tr('すべて選択', 'Select all', '全选'), action: () => term.selectAll() },
+      { label: tr('クリア', 'Clear', '清除'), action: () => term.clear() },
       { label: '', separator: true },
-      { label: 'このターミナルを閉じる', action: () => store.closeTerminal(session.key) },
+      { label: tr('このターミナルを閉じる', 'Close this terminal', '关闭此终端'), action: () => store.closeTerminal(session.key) },
     ]);
   }
 </script>

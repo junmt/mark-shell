@@ -29,6 +29,7 @@ import {
 } from './api';
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { resolveTheme } from './themes';
+import { i18n, resolveLocale, tr } from './i18n.svelte';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
 
@@ -208,6 +209,7 @@ class Store {
     this.systemDark = mq.matches;
     mq.addEventListener('change', (e) => (this.systemDark = e.matches));
     this.config = mergeConfig(await api.getConfig());
+    await this.applyLanguage();
 
     // 走査結果は世代番号の新しいものだけを採る。invoke の戻り値より先に届くことがあるので、
     // ここで新しい世代を見つけたら一覧を作り直す
@@ -221,7 +223,15 @@ class Store {
       this.scanDoneGen = e.payload.gen;
       this.scanTruncated = e.payload.truncated;
       if (e.payload.truncated) {
-        this.toast(`ファイルが多すぎるため ${e.payload.files.toLocaleString()} 件で探索を止めました。中のフォルダを開くなど、より狭い範囲を開いてください。`, 'error');
+        const n = e.payload.files.toLocaleString();
+        this.toast(
+          tr(
+            `ファイルが多すぎるため ${n} 件で探索を止めました。中のフォルダを開くなど、より狭い範囲を開いてください。`,
+            `Too many files. Stopped scanning at ${n} files. Open a narrower folder, such as a subfolder.`,
+            `文件过多，已在 ${n} 个时停止扫描。请打开范围更小的文件夹，例如其中的子文件夹。`,
+          ),
+          'error',
+        );
       }
     });
     await listen<{ changes: Change[] }>('fs:change', (e) => this.onFsChange(e.payload.changes));
@@ -272,20 +282,30 @@ class Store {
     try {
       update = await checkUpdate();
     } catch (e) {
-      if (manual) this.toast(`アップデートを確認できません: ${errorMessage(e)}`, 'error');
+      if (manual) {
+        const msg = errorMessage(e);
+        this.toast(tr(`アップデートを確認できません: ${msg}`, `Couldn't check for updates: ${msg}`, `无法检查更新：${msg}`), 'error');
+      }
       return;
     }
     if (!update) {
-      if (manual) this.toast(`最新のバージョン（${await getVersion()}）です`);
+      if (manual) {
+        const v = await getVersion();
+        this.toast(tr(`最新のバージョン（${v}）です`, `You're on the latest version (${v})`, `已是最新版本（${v}）`));
+      }
       return;
     }
     if (!(await api.isInstalled())) {
       // 単体実行版の exe は自分を置き換えられないので、ダウンロードしてもらう
       const ok = await this.confirm(
-        'アップデート',
-        `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。インストールせずに使う版なので、自動では更新できません。リリースのページを開きますか？`,
-        'ページを開く',
-        'あとで',
+        tr('アップデート', 'Update', '更新'),
+        tr(
+          `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。インストールせずに使う版なので、自動では更新できません。リリースのページを開きますか？`,
+          `Version ${update.version} is available (current: ${update.currentVersion}). This portable version can't update itself. Open the releases page?`,
+          `有新版本 ${update.version}（当前为 ${update.currentVersion}）。此版本为免安装版，无法自动更新。要打开发布页面吗？`,
+        ),
+        tr('ページを開く', 'Open page', '打开页面'),
+        tr('あとで', 'Later', '稍后'),
       );
       if (ok) await openUrl(RELEASES_URL);
       else this.updateDeclined = true;
@@ -293,11 +313,21 @@ class Store {
     }
     const running = this.terminals.some((t) => !t.exited);
     const ok = await this.confirm(
-      'アップデート',
-      `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。更新して再起動しますか？編集中のファイルは保存します。` +
-        (running ? 'ターミナル（AI ツールを含む）は終了します。' : ''),
-      '更新して再起動',
-      'あとで',
+      tr('アップデート', 'Update', '更新'),
+      tr(
+        `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。更新して再起動しますか？編集中のファイルは保存します。`,
+        `Version ${update.version} is available (current: ${update.currentVersion}). Update and restart? Open files will be saved.`,
+        `有新版本 ${update.version}（当前为 ${update.currentVersion}）。要更新并重新启动吗？正在编辑的文件会被保存。`,
+      ) +
+        (running
+          ? tr(
+              'ターミナル（AI ツールを含む）は終了します。',
+              ' Terminals (including AI tools) will be closed.',
+              '终端（包括 AI 工具）将被关闭。',
+            )
+          : ''),
+      tr('更新して再起動', 'Update and restart', '更新并重新启动'),
+      tr('あとで', 'Later', '稍后'),
     );
     if (!ok) {
       this.updateDeclined = true;
@@ -305,20 +335,21 @@ class Store {
     }
     await this.saveAll();
     this.saveWorkspaceStateNow();
-    this.toast(`バージョン ${update.version} をダウンロードしています…`);
+    this.toast(tr(`バージョン ${update.version} をダウンロードしています…`, `Downloading version ${update.version}…`, `正在下载版本 ${update.version}…`));
     try {
       // Windows ではインストーラーが動くとアプリは終了し、入れ替え後に起動し直す
       await update.downloadAndInstall();
       await relaunch();
     } catch (e) {
-      this.toast(`アップデートできませんでした: ${errorMessage(e)}`, 'error');
+      const msg = errorMessage(e);
+      this.toast(tr(`アップデートできませんでした: ${msg}`, `Couldn't update: ${msg}`, `更新失败：${msg}`), 'error');
     }
   }
 
   // ================= ルートディレクトリ =================
 
   async chooseRoot() {
-    const dir = await openDialog({ directory: true, multiple: false, title: 'フォルダを開く' });
+    const dir = await openDialog({ directory: true, multiple: false, title: tr('フォルダを開く', 'Open folder', '打开文件夹') });
     if (typeof dir === 'string') await this.openRoot(dir);
   }
 
@@ -333,7 +364,7 @@ class Store {
     if (this.root) this.saveWorkspaceStateNow();
     let res;
     // WSL のフォルダは、初回に WSL へエージェントを置いて起動するので数秒かかる
-    if (/^\\\\(\?\\UNC\\)?wsl(\.localhost|\$)\\/i.test(path)) this.toast('WSL に接続しています…');
+    if (/^\\\\(\?\\UNC\\)?wsl(\.localhost|\$)\\/i.test(path)) this.toast(tr('WSL に接続しています…', 'Connecting to WSL…', '正在连接 WSL…'));
     try {
       res = await api.openRoot(path);
     } catch (e) {
@@ -346,7 +377,17 @@ class Store {
     this.root = res.root;
     this.rootName = res.name;
     this.wsl = res.wsl;
-    if (res.wslError) this.toast(`WSL のエージェントを使えないため、変更の自動反映などが動きません: ${res.wslError}`, 'error');
+    if (res.wslError) {
+      const err = res.wslError;
+      this.toast(
+        tr(
+          `WSL のエージェントを使えないため、変更の自動反映などが動きません: ${err}`,
+          `The WSL agent isn't available, so features like live reload of changes won't work: ${err}`,
+          `无法使用 WSL 代理，自动同步更改等功能将无法工作：${err}`,
+        ),
+        'error',
+      );
+    }
     // WSL のフォルダでは AI ツールを WSL の中で探し直す
     void this.refreshAiTools();
     this.expanded.clear();
@@ -403,11 +444,18 @@ class Store {
       }
     }
     if (pending.length === 0) return;
+    const n = pending.length;
+    const bullet = tr('・', '• ', '• ');
+    const names = pending.map((p) => bullet + p.path).join('\n');
     const ok = await this.confirm(
-      '編集内容の復元',
-      `前回、保存されないまま終了したファイルが ${pending.length} 件あります。\n${pending.map((p) => '・' + p.path).join('\n')}\n\n編集内容を復元しますか？（復元後に保存すると反映されます）`,
-      '復元する',
-      '破棄する',
+      tr('編集内容の復元', 'Restore unsaved changes', '恢复编辑内容'),
+      tr(
+        `前回、保存されないまま終了したファイルが ${n} 件あります。\n${names}\n\n編集内容を復元しますか？（復元後に保存すると反映されます）`,
+        `${n} file(s) had unsaved changes when the app last closed.\n${names}\n\nRestore the changes? (They're written to disk when you save.)`,
+        `上次有 ${n} 个文件未保存就退出了。\n${names}\n\n要恢复编辑内容吗？（恢复后保存即可生效）`,
+      ),
+      tr('復元する', 'Restore', '恢复'),
+      tr('破棄する', 'Discard', '丢弃'),
     );
     for (const r of pending) {
       if (ok) {
@@ -484,7 +532,13 @@ class Store {
       const exists = await api.pathExists(doc.path).catch(() => false);
       if (!exists && !doc.deleted) {
         doc.deleted = true;
-        this.toast(`${doc.path} は削除されました。保存すると作り直します。`);
+        this.toast(
+          tr(
+            `${doc.path} は削除されました。保存すると作り直します。`,
+            `${doc.path} was deleted. Save to recreate it.`,
+            `${doc.path} 已被删除。保存即可重新创建。`,
+          ),
+        );
       }
       return;
     }
@@ -525,10 +579,11 @@ class Store {
       const d = new Date();
       const p2 = (n: number) => String(n).padStart(2, '0');
       const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}`;
-      const copy = join(dirname(doc.path), `${basename(doc.path).replace(/(\.[^.]+)?$/, ` (競合 ${stamp})$1`)}`);
+      const suffix = tr(` (競合 ${stamp})`, ` (conflict ${stamp})`, ` (冲突 ${stamp})`);
+      const copy = join(dirname(doc.path), `${basename(doc.path).replace(/(\.[^.]+)?$/, `${suffix}$1`)}`);
       void api
         .createFile(copy, mine)
-        .then((p) => this.toast(`自分の変更を ${p} に保存しました`))
+        .then((p) => this.toast(tr(`自分の変更を ${p} に保存しました`, `Saved your changes to ${p}`, `已将你的更改保存到 ${p}`)))
         .catch((e) => this.toast(errorMessage(e), 'error'));
       this.setDocText(doc, disk.content);
       doc.saved = disk.content;
@@ -578,7 +633,12 @@ class Store {
       } else if (msg.startsWith(NOT_TEXT_PREFIX)) {
         // 画像や Office のファイルなどは、Windows の既定のアプリで開けるようにする
         if (opts.quiet) return;
-        const ok = await this.confirm('ファイルを開く', `${msg.slice(NOT_TEXT_PREFIX.length)}。既定のアプリで開きますか？`, '既定のアプリで開く');
+        const reason = msg.slice(NOT_TEXT_PREFIX.length);
+        const ok = await this.confirm(
+          tr('ファイルを開く', 'Open file', '打开文件'),
+          tr(`${reason}。既定のアプリで開きますか？`, `${reason}. Open it in the default app?`, `${reason}。要用默认应用打开吗？`),
+          tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+        );
         if (ok) await api.openWithDefaultApp(path).catch((err) => this.toast(errorMessage(err), 'error'));
         return;
       } else {
@@ -621,7 +681,17 @@ class Store {
     if (doc.dirty) {
       const ok = await this.save(doc);
       if (!ok) {
-        const discard = await this.confirm('保存できません', `${doc.path} を保存できませんでした。変更を破棄して閉じますか？`, '破棄して閉じる', 'キャンセル', true);
+        const discard = await this.confirm(
+          tr('保存できません', "Couldn't save", '无法保存'),
+          tr(
+            `${doc.path} を保存できませんでした。変更を破棄して閉じますか？`,
+            `Couldn't save ${doc.path}. Close and discard changes?`,
+            `无法保存 ${doc.path}。要放弃更改并关闭吗？`,
+          ),
+          tr('破棄して閉じる', 'Discard and close', '放弃并关闭'),
+          tr('キャンセル', 'Cancel', '取消'),
+          true,
+        );
         if (!discard) return;
         void api.deleteRecovery(doc.path).catch(() => {});
       }
@@ -671,7 +741,7 @@ class Store {
     if (!doc.dirty && !force) return true;
     if (this.conflict?.doc === doc) return false;
     if (doc.readonly) {
-      this.toast(`${doc.path} は読み取り専用です`, 'error');
+      this.toast(tr(`${doc.path} は読み取り専用です`, `${doc.path} is read-only`, `${doc.path} 是只读文件`), 'error');
       return false;
     }
     const text = doc.text;
@@ -687,9 +757,13 @@ class Store {
         const msg = errorMessage(e);
         if (msg === 'unmappable') {
           const conv = await this.confirm(
-            '文字コード',
-            `${doc.path} は ${doc.encoding} で保存されていますが、この文字コードでは表せない文字が含まれています。UTF-8 に変えて保存しますか？`,
-            'UTF-8 で保存',
+            tr('文字コード', 'Encoding', '编码'),
+            tr(
+              `${doc.path} は ${doc.encoding} で保存されていますが、この文字コードでは表せない文字が含まれています。UTF-8 に変えて保存しますか？`,
+              `${doc.path} is saved in ${doc.encoding}, but it contains characters that this encoding can't represent. Save as UTF-8 instead?`,
+              `${doc.path} 以 ${doc.encoding} 编码保存，但包含该编码无法表示的字符。要改为 UTF-8 保存吗？`,
+            ),
+            tr('UTF-8 で保存', 'Save as UTF-8', '以 UTF-8 保存'),
           );
           if (conv) {
             doc.encoding = 'utf-8';
@@ -735,7 +809,13 @@ class Store {
 
   async newFile(dir = this.targetDir()) {
     if (!this.root) return;
-    const name = await this.prompt('新しいファイル', `${dir || this.rootName} に作るファイルの名前`, '無題.md', true);
+    const where = dir || this.rootName;
+    const name = await this.prompt(
+      tr('新しいファイル', 'New file', '新建文件'),
+      tr(`${where} に作るファイルの名前`, `Name of the new file in ${where}`, `要在 ${where} 中创建的文件名`),
+      tr('無題.md', 'Untitled.md', '无标题.md'),
+      true,
+    );
     if (!name) return;
     const file = /\.[^./]+$/.test(name) ? name : `${name}.md`;
     try {
@@ -751,7 +831,12 @@ class Store {
 
   async newFolder(dir = this.targetDir()) {
     if (!this.root) return;
-    const name = await this.prompt('新しいフォルダ', `${dir || this.rootName} に作るフォルダの名前`, '');
+    const where = dir || this.rootName;
+    const name = await this.prompt(
+      tr('新しいフォルダ', 'New folder', '新建文件夹'),
+      tr(`${where} に作るフォルダの名前`, `Name of the new folder in ${where}`, `要在 ${where} 中创建的文件夹名`),
+      '',
+    );
     if (!name) return;
     try {
       const path = await api.createDir(join(dir, name));
@@ -766,7 +851,7 @@ class Store {
   }
 
   async rename(path: string) {
-    const name = await this.prompt('名前の変更', path, basename(path), true);
+    const name = await this.prompt(tr('名前の変更', 'Rename', '重命名'), path, basename(path), true);
     if (!name || name === basename(path)) return;
     const entry = this.entries.get(path);
     let newName = name;
@@ -778,7 +863,7 @@ class Store {
   async move(from: string, to: string) {
     if (from === to) return;
     if (isInside(to, from)) {
-      this.toast('フォルダをその中に移動することはできません', 'error');
+      this.toast(tr('フォルダをその中に移動することはできません', "Can't move a folder into itself", '无法将文件夹移动到其自身内部'), 'error');
       return;
     }
     await this.saveAll();
@@ -787,12 +872,16 @@ class Store {
       const count = await api.countLinkUpdates(from, to);
       if (count > 0) {
         const r = await this.ask({
-          title: 'リンクの書き換え',
-          message: `${from} へのリンクなど、${count} 件のリンクが影響を受けます。新しい場所に合わせて書き換えますか？`,
+          title: tr('リンクの書き換え', 'Update links', '更新链接'),
+          message: tr(
+            `${from} へのリンクなど、${count} 件のリンクが影響を受けます。新しい場所に合わせて書き換えますか？`,
+            `${count} link(s), including links to ${from}, are affected. Update them to point to the new location?`,
+            `包括指向 ${from} 的链接在内，共有 ${count} 个链接受到影响。要按新位置更新这些链接吗？`,
+          ),
           buttons: [
-            { label: 'キャンセル', value: 'cancel' },
-            { label: '書き換えない', value: 'no' },
-            { label: '書き換える', value: 'yes', primary: true },
+            { label: tr('キャンセル', 'Cancel', '取消'), value: 'cancel' },
+            { label: tr('書き換えない', "Don't update", '不更新'), value: 'no' },
+            { label: tr('書き換える', 'Update', '更新'), value: 'yes', primary: true },
           ],
         });
         if (!r || r.button === 'cancel') return;
@@ -817,7 +906,11 @@ class Store {
       }
       this.selected = res.path;
       this.treeVersion++;
-      if (res.links > 0) this.toast(`${res.files.length} 個のファイルで ${res.links} 件のリンクを書き換えました`);
+      if (res.links > 0) {
+        const nf = res.files.length;
+        const nl = res.links;
+        this.toast(tr(`${nf} 個のファイルで ${nl} 件のリンクを書き換えました`, `Updated ${nl} link(s) in ${nf} file(s)`, `已在 ${nf} 个文件中更新 ${nl} 个链接`));
+      }
       this.saveWorkspaceState();
     } catch (e) {
       this.toast(errorMessage(e), 'error');
@@ -826,11 +919,16 @@ class Store {
 
   async remove(path: string) {
     const entry = this.entries.get(path);
+    const isDir = !!entry?.dir;
     const ok = await this.confirm(
-      '削除',
-      `${path}${entry?.dir ? ' フォルダとその中身' : ''} をごみ箱に移動しますか？`,
-      'ごみ箱に移動',
-      'キャンセル',
+      tr('削除', 'Delete', '删除'),
+      tr(
+        `${path}${isDir ? ' フォルダとその中身' : ''} をごみ箱に移動しますか？`,
+        `Move ${isDir ? 'the folder ' : ''}${path}${isDir ? ' and its contents' : ''} to the Recycle Bin?`,
+        `要将 ${path}${isDir ? ' 文件夹及其内容' : ''}移到回收站吗？`,
+      ),
+      tr('ごみ箱に移動', 'Move to Recycle Bin', '移到回收站'),
+      tr('キャンセル', 'Cancel', '取消'),
       true,
     );
     if (!ok) return;
@@ -867,7 +965,7 @@ class Store {
   async copyPath(path: string, rel: boolean) {
     const text = rel ? path : await api.absolutePath(path);
     await navigator.clipboard.writeText(text);
-    this.toast(`コピーしました: ${text}`);
+    this.toast(tr(`コピーしました: ${text}`, `Copied: ${text}`, `已复制：${text}`));
   }
 
   // ================= 貼り付け・ドロップ =================
@@ -919,19 +1017,26 @@ class Store {
         if (!this.root) await this.openRoot(p);
         else {
           const r = await this.ask({
-            title: 'フォルダを開く',
+            title: tr('フォルダを開く', 'Open folder', '打开文件夹'),
             message: p,
             buttons: [
-              { label: 'キャンセル', value: 'cancel' },
-              { label: '新しいウィンドウで開く', value: 'new' },
-              { label: 'このウィンドウで開く', value: 'here', primary: true },
+              { label: tr('キャンセル', 'Cancel', '取消'), value: 'cancel' },
+              { label: tr('新しいウィンドウで開く', 'Open in new window', '在新窗口中打开'), value: 'new' },
+              { label: tr('このウィンドウで開く', 'Open in this window', '在此窗口中打开'), value: 'here', primary: true },
             ],
           });
           if (r?.button === 'here') await this.openRoot(p);
           else if (r?.button === 'new') await api.openNewWindow(p);
         }
       } else {
-        this.toast('開いているフォルダの外のファイルは開けません。フォルダごと開いてください。', 'error');
+        this.toast(
+          tr(
+            '開いているフォルダの外のファイルは開けません。フォルダごと開いてください。',
+            "Can't open files outside the open folder. Open their folder instead.",
+            '无法打开当前文件夹以外的文件。请打开其所在的文件夹。',
+          ),
+          'error',
+        );
       }
     }
   }
@@ -955,18 +1060,25 @@ class Store {
     const files = [...new Set(this.searchHits.map((h) => h.path))];
     if (files.length === 0) return;
     const count = this.searchHits.reduce((n, h) => n + h.ranges.length, 0);
+    const nf = files.length;
     const ok = await this.confirm(
-      'すべて置換',
-      `${files.length} 個のファイルで約 ${count} 件を「${replacement}」に置き換えます。よろしいですか？`,
-      '置換する',
-      'キャンセル',
+      tr('すべて置換', 'Replace all', '全部替换'),
+      tr(
+        `${nf} 個のファイルで約 ${count} 件を「${replacement}」に置き換えます。よろしいですか？`,
+        `Replace about ${count} match(es) in ${nf} file(s) with "${replacement}"?`,
+        `将在 ${nf} 个文件中把约 ${count} 处替换为“${replacement}”。确定吗？`,
+      ),
+      tr('置換する', 'Replace', '替换'),
+      tr('キャンセル', 'Cancel', '取消'),
       true,
     );
     if (!ok) return;
     await this.saveAll();
     try {
       const r = await api.replaceInFiles($state.snapshot(this.searchOptions), replacement, files);
-      this.toast(`${r.files.length} 個のファイルで ${r.replacements} 件を置き換えました`);
+      const rf = r.files.length;
+      const rn = r.replacements;
+      this.toast(tr(`${rf} 個のファイルで ${rn} 件を置き換えました`, `Replaced ${rn} match(es) in ${rf} file(s)`, `已在 ${rf} 个文件中替换 ${rn} 处`));
       await this.runSearch();
     } catch (e) {
       this.toast(errorMessage(e), 'error');
@@ -1009,7 +1121,7 @@ class Store {
 
   newTerminal(opts: { shellId?: string | null; toolId?: string; actionId?: string; cwd?: string | null; title?: string } = {}) {
     if (!this.root) {
-      this.toast('先にフォルダを開いてください', 'error');
+      this.toast(tr('先にフォルダを開いてください', 'Open a folder first', '请先打开文件夹'), 'error');
       return;
     }
     void this.syncAiContext();
@@ -1021,7 +1133,7 @@ class Store {
     // シェル未指定なら Rust 側と同じく PowerShell 7 → Windows PowerShell の順で使われる
     const shell =
       this.shells.find((s) => s.id === shellId) ?? this.shells.find((s) => s.id === 'pwsh') ?? this.shells.find((s) => s.id === 'powershell');
-    const title = opts.title ?? (opts.toolId ? this.aiTools.find((t) => t.id === opts.toolId)?.name : shell?.name) ?? 'ターミナル';
+    const title = opts.title ?? (opts.toolId ? this.aiTools.find((t) => t.id === opts.toolId)?.name : shell?.name) ?? tr('ターミナル', 'Terminal', '终端');
     const s = new TermSession(
       ++this.termSeq,
       title,
@@ -1059,7 +1171,15 @@ class Store {
   async launchTool(tool: ToolInfo, actionId?: string) {
     if (!tool.found) {
       if (tool.installUrl) {
-        const ok = await this.confirm(tool.name, `${tool.name} が見つかりません。インストール方法のページをブラウザで開きますか？`, '開く');
+        const ok = await this.confirm(
+          tool.name,
+          tr(
+            `${tool.name} が見つかりません。インストール方法のページをブラウザで開きますか？`,
+            `${tool.name} wasn't found. Open the installation page in your browser?`,
+            `未找到 ${tool.name}。要在浏览器中打开安装说明页面吗？`,
+          ),
+          tr('開く', 'Open', '打开'),
+        );
         if (ok) await openUrl(tool.installUrl);
       }
       return;
@@ -1090,7 +1210,11 @@ class Store {
   showAiDiff(doc: Doc) {
     const before = this.aiBefore.get(doc.path);
     if (before === undefined) return;
-    this.diff = { title: `${doc.path} の変更（AI セッション中）`, before, after: doc.text };
+    this.diff = {
+      title: tr(`${doc.path} の変更（AI セッション中）`, `Changes to ${doc.path} (during AI session)`, `${doc.path} 的更改（AI 会话期间）`),
+      before,
+      after: doc.text,
+    };
   }
 
   async revertAiChange(doc: Doc) {
@@ -1102,7 +1226,7 @@ class Store {
   }
 
   async createAiGuide() {
-    const body = `# このフォルダについて
+    const ja = `# このフォルダについて
 
 このフォルダは Markdown のメモ置き場です。mark-shell というアプリで表示・編集しています。
 
@@ -1119,13 +1243,48 @@ class Store {
 - ファイルを移動・名前変更するときは、それを参照しているリンクも直してください。
 - 指示されていないファイルは変更しないでください。
 `;
+    const en = `# About this folder
+
+This folder holds Markdown notes. They are viewed and edited with an app called mark-shell.
+
+## Conventions
+
+- Each note is a single \`.md\` file. Files are encoded in UTF-8.
+- A note may start with YAML front matter (\`title\`, \`tags\`, etc.). It is optional.
+- Link to other notes with a relative path, \`[label](../folder/file.md)\`, or with \`[[file name]]\`.
+- Put images in an \`assets/\` folder next to the note and reference them as \`![](assets/xxx.png)\`.
+- Diagrams can be written in \`\`\`mermaid code blocks, and math as \`$...$\` / \`$$...$$\`.
+
+## Requests
+
+- When you move or rename a file, also fix the links that point to it.
+- Don't change files you weren't asked to change.
+`;
+    const zh = `# 关于此文件夹
+
+此文件夹用于存放 Markdown 笔记，使用名为 mark-shell 的应用查看和编辑。
+
+## 格式约定
+
+- 每条笔记是一个 \`.md\` 文件，字符编码为 UTF-8。
+- 开头可能带有 YAML front matter（\`title\`、\`tags\` 等），也可以没有。
+- 链接到其他笔记时，使用相对路径 \`[显示名](../folder/file.md)\` 或 \`[[文件名]]\`。
+- 图片放在笔记所在文件夹的 \`assets/\` 中，用 \`![](assets/xxx.png)\` 引用。
+- 图表可以用 \`\`\`mermaid 代码块编写，公式用 \`$...$\` / \`$$...$$\` 编写。
+
+## 注意事项
+
+- 移动文件或重命名时，请同时修正引用它的链接。
+- 请不要修改未被要求修改的文件。
+`;
+    const body = tr(ja, en, zh);
     for (const name of ['CLAUDE.md', 'AGENTS.md']) {
       if (await api.pathExists(name)) {
-        this.toast(`${name} は既にあるので変更しませんでした`);
+        this.toast(tr(`${name} は既にあるので変更しませんでした`, `${name} already exists, so it was left unchanged`, `${name} 已存在，未作修改`));
         continue;
       }
       await api.createFile(name, body);
-      this.toast(`${name} を作りました`);
+      this.toast(tr(`${name} を作りました`, `Created ${name}`, `已创建 ${name}`));
     }
   }
 
@@ -1165,7 +1324,11 @@ class Store {
       return;
     }
     if (!entry && !isImage(target)) {
-      const create = await this.confirm('リンク先がありません', `${target} はありません。作りますか？`, '作る');
+      const create = await this.confirm(
+        tr('リンク先がありません', 'Link target not found', '链接目标不存在'),
+        tr(`${target} はありません。作りますか？`, `${target} doesn't exist. Create it?`, `${target} 不存在。要创建吗？`),
+        tr('作る', 'Create', '创建'),
+      );
       if (!create) return;
       try {
         await api.createFile(target);
@@ -1189,7 +1352,11 @@ class Store {
   pendingAnchor: string | null = null;
 
   async openExternal(url: string) {
-    const ok = await this.confirm('外部リンク', `ブラウザで開きますか？\n${url}`, '開く');
+    const ok = await this.confirm(
+      tr('外部リンク', 'External link', '外部链接'),
+      tr(`ブラウザで開きますか？\n${url}`, `Open in your browser?\n${url}`, `要在浏览器中打开吗？\n${url}`),
+      tr('開く', 'Open', '打开'),
+    );
     if (ok) await openUrl(url);
   }
 
@@ -1214,14 +1381,24 @@ class Store {
       size = clamp(this.config.terminal.fontSize);
       this.config.terminal.fontSize = size;
     }
-    const label = { editor: 'エディタ', preview: 'プレビュー', terminal: 'ターミナル' }[target];
-    this.zoomHint = `${label}の文字: ${size}px`;
+    this.zoomHint = {
+      editor: tr(`エディタの文字: ${size}px`, `Editor font: ${size}px`, `编辑器字号：${size}px`),
+      preview: tr(`プレビューの文字: ${size}px`, `Preview font: ${size}px`, `预览字号：${size}px`),
+      terminal: tr(`ターミナルの文字: ${size}px`, `Terminal font: ${size}px`, `终端字号：${size}px`),
+    }[target];
     if (this.zoomTimer) clearTimeout(this.zoomTimer);
     this.zoomTimer = setTimeout(() => (this.zoomHint = null), 1200);
     if (this.zoomSaveTimer) clearTimeout(this.zoomSaveTimer);
     this.zoomSaveTimer = setTimeout(() => {
       void api.setConfig($state.snapshot(this.config)).catch((e) => this.toast(errorMessage(e), 'error'));
     }, 500);
+  }
+
+  /** 設定の言語（system なら PC の言語）を画面と Rust 側（エラーメッセージ・WSL のエージェント）に反映する */
+  async applyLanguage() {
+    i18n.locale = resolveLocale(this.config.language);
+    document.documentElement.lang = i18n.locale === 'zh' ? 'zh-CN' : i18n.locale;
+    await api.setLocale(i18n.locale).catch(() => {});
   }
 
   async updateConfig(patch: Partial<Config>) {
@@ -1231,6 +1408,11 @@ class Store {
       await api.setConfig($state.snapshot(this.config));
     } catch (e) {
       this.toast(errorMessage(e), 'error');
+    }
+    if (before.language !== this.config.language) {
+      await this.applyLanguage();
+      // AI ツールのメニュー名も言語に合わせて読み直す
+      void this.refreshAiTools();
     }
     const scanKeys: (keyof Config)[] = ['markdownExtensions', 'followSymlinks'];
     if (scanKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(this.config[k])) && this.root) {
@@ -1253,7 +1435,7 @@ class Store {
     });
   }
 
-  async confirm(title: string, message: string, ok = 'OK', cancel = 'キャンセル', danger = false): Promise<boolean> {
+  async confirm(title: string, message: string, ok = 'OK', cancel = tr('キャンセル', 'Cancel', '取消'), danger = false): Promise<boolean> {
     const r = await this.ask({
       title,
       message,
@@ -1271,7 +1453,7 @@ class Store {
       message,
       input: { value, selectStem },
       buttons: [
-        { label: 'キャンセル', value: 'cancel' },
+        { label: tr('キャンセル', 'Cancel', '取消'), value: 'cancel' },
         { label: 'OK', value: 'ok', primary: true },
       ],
     });
@@ -1279,7 +1461,10 @@ class Store {
     const v = r.value.trim();
     if (!v) return null;
     if (/[\\:*?"<>|]/.test(v) || v.includes('..')) {
-      this.toast('名前に \\ : * ? " < > | や .. は使えません', 'error');
+      this.toast(
+        tr('名前に \\ : * ? " < > | や .. は使えません', 'Names can\'t contain \\ : * ? " < > | or ..', '名称中不能包含 \\ : * ? " < > | 或 ..'),
+        'error',
+      );
       return null;
     }
     return v;
@@ -1306,35 +1491,57 @@ class Store {
   commands(): Command[] {
     const doc = this.activeDoc;
     const list: Command[] = [
-      { id: 'open', label: 'フォルダを開く', shortcut: 'Ctrl+O', run: () => void this.chooseRoot() },
-      { id: 'openRecent', label: '最近開いたフォルダを開く', shortcut: 'Ctrl+R', run: () => void this.chooseRecentRoot() },
-      { id: 'newWindow', label: '新しいウィンドウ', run: () => void api.openNewWindow() },
-      { id: 'newFile', label: '新しいファイル', shortcut: 'Ctrl+N', run: () => void this.newFile() },
-      { id: 'newFolder', label: '新しいフォルダ', run: () => void this.newFolder() },
-      { id: 'save', label: '保存', shortcut: 'Ctrl+S', run: () => doc && void this.save(doc, true) },
-      { id: 'saveAll', label: 'すべて保存', run: () => void this.saveAll() },
-      { id: 'close', label: 'タブを閉じる', shortcut: 'Ctrl+W', run: () => doc && void this.closeTab(doc.path) },
-      { id: 'quickOpen', label: 'ファイルを開く（名前で検索）', shortcut: 'Ctrl+P', run: () => (this.palette = 'files') },
-      { id: 'search', label: '全文検索', shortcut: 'Ctrl+Shift+F', run: () => this.showLeft('search') },
-      { id: 'files', label: 'ファイルツリーを表示', run: () => this.showLeft('files') },
-      { id: 'outline', label: 'アウトラインを表示', run: () => this.showLeft('outline') },
-      { id: 'toggleLeft', label: '左ペインの表示切り替え', shortcut: 'Ctrl+Shift+E', run: () => this.toggleLeft() },
-      { id: 'mode', label: '表示モードの切り替え（編集 / 分割 / プレビュー）', shortcut: 'Ctrl+Shift+V', run: () => this.cycleMode() },
-      { id: 'terminal', label: 'ターミナルの表示切り替え', shortcut: 'Ctrl+`', run: () => this.toggleTerminal() },
-      { id: 'newTerminal', label: '新しいターミナル', run: () => this.newTerminal() },
-      { id: 'rescan', label: 'フォルダを読み込み直す', run: () => void this.rescan() },
-      { id: 'reveal', label: 'エクスプローラーで表示', run: () => void api.revealInExplorer(doc?.path ?? '') },
-      { id: 'print', label: '印刷 / PDF に保存', run: () => void this.print() },
-      { id: 'aiGuide', label: 'AI 向けの説明ファイル（CLAUDE.md / AGENTS.md）を作成', run: () => void this.createAiGuide() },
-      { id: 'aiRefresh', label: 'AI ツールを探し直す', run: () => void this.refreshAiTools() },
-      { id: 'update', label: 'アップデートを確認', run: () => void this.checkForUpdate(true) },
-      { id: 'settings', label: '設定', shortcut: 'Ctrl+,', run: () => (this.settingsOpen = true) },
+      { id: 'open', label: tr('フォルダを開く', 'Open folder', '打开文件夹'), shortcut: 'Ctrl+O', run: () => void this.chooseRoot() },
+      { id: 'openRecent', label: tr('最近開いたフォルダを開く', 'Open recent folder', '打开最近的文件夹'), shortcut: 'Ctrl+R', run: () => void this.chooseRecentRoot() },
+      { id: 'newWindow', label: tr('新しいウィンドウ', 'New window', '新建窗口'), run: () => void api.openNewWindow() },
+      { id: 'newFile', label: tr('新しいファイル', 'New file', '新建文件'), shortcut: 'Ctrl+N', run: () => void this.newFile() },
+      { id: 'newFolder', label: tr('新しいフォルダ', 'New folder', '新建文件夹'), run: () => void this.newFolder() },
+      { id: 'save', label: tr('保存', 'Save', '保存'), shortcut: 'Ctrl+S', run: () => doc && void this.save(doc, true) },
+      { id: 'saveAll', label: tr('すべて保存', 'Save all', '全部保存'), run: () => void this.saveAll() },
+      { id: 'close', label: tr('タブを閉じる', 'Close tab', '关闭标签页'), shortcut: 'Ctrl+W', run: () => doc && void this.closeTab(doc.path) },
+      {
+        id: 'quickOpen',
+        label: tr('ファイルを開く（名前で検索）', 'Go to file (search by name)', '转到文件（按名称搜索）'),
+        shortcut: 'Ctrl+P',
+        run: () => (this.palette = 'files'),
+      },
+      { id: 'search', label: tr('全文検索', 'Search in files', '全文搜索'), shortcut: 'Ctrl+Shift+F', run: () => this.showLeft('search') },
+      { id: 'files', label: tr('ファイルツリーを表示', 'Show file tree', '显示文件树'), run: () => this.showLeft('files') },
+      { id: 'outline', label: tr('アウトラインを表示', 'Show outline', '显示大纲'), run: () => this.showLeft('outline') },
+      { id: 'toggleLeft', label: tr('左ペインの表示切り替え', 'Toggle side bar', '切换侧边栏'), shortcut: 'Ctrl+Shift+E', run: () => this.toggleLeft() },
+      {
+        id: 'mode',
+        label: tr('表示モードの切り替え（編集 / 分割 / プレビュー）', 'Switch view mode (edit / split / preview)', '切换显示模式（编辑 / 分栏 / 预览）'),
+        shortcut: 'Ctrl+Shift+V',
+        run: () => this.cycleMode(),
+      },
+      { id: 'terminal', label: tr('ターミナルの表示切り替え', 'Toggle terminal', '切换终端'), shortcut: 'Ctrl+`', run: () => this.toggleTerminal() },
+      { id: 'newTerminal', label: tr('新しいターミナル', 'New terminal', '新建终端'), run: () => this.newTerminal() },
+      { id: 'rescan', label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), run: () => void this.rescan() },
+      { id: 'reveal', label: tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
+      { id: 'print', label: tr('印刷 / PDF に保存', 'Print / Save as PDF', '打印 / 保存为 PDF'), run: () => void this.print() },
+      {
+        id: 'aiGuide',
+        label: tr(
+          'AI 向けの説明ファイル（CLAUDE.md / AGENTS.md）を作成',
+          'Create guide files for AI (CLAUDE.md / AGENTS.md)',
+          '创建面向 AI 的说明文件（CLAUDE.md / AGENTS.md）',
+        ),
+        run: () => void this.createAiGuide(),
+      },
+      { id: 'aiRefresh', label: tr('AI ツールを探し直す', 'Rescan for AI tools', '重新查找 AI 工具'), run: () => void this.refreshAiTools() },
+      { id: 'update', label: tr('アップデートを確認', 'Check for updates', '检查更新'), run: () => void this.checkForUpdate(true) },
+      { id: 'settings', label: tr('設定', 'Settings', '设置'), shortcut: 'Ctrl+,', run: () => (this.settingsOpen = true) },
     ];
     for (const s of this.shells) {
-      list.push({ id: `shell:${s.id}`, label: `ターミナル: ${s.name} を開く`, run: () => this.newTerminal({ shellId: s.id }) });
+      list.push({
+        id: `shell:${s.id}`,
+        label: tr(`ターミナル: ${s.name} を開く`, `Terminal: Open ${s.name}`, `终端：打开 ${s.name}`),
+        run: () => this.newTerminal({ shellId: s.id }),
+      });
     }
     for (const t of this.aiTools.filter((t) => t.found)) {
-      list.push({ id: `ai:${t.id}`, label: `AI: ${t.name} を起動`, run: () => void this.launchTool(t) });
+      list.push({ id: `ai:${t.id}`, label: tr(`AI: ${t.name} を起動`, `AI: Launch ${t.name}`, `AI：启动 ${t.name}`), run: () => void this.launchTool(t) });
       if (doc) {
         for (const a of t.actions) {
           list.push({ id: `ai:${t.id}:${a.id}`, label: `AI: ${t.name} - ${a.label}`, run: () => void this.launchTool(t, a.id) });

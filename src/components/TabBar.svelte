@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store, type Doc } from '../lib/store.svelte';
   import { basename, dirname } from '../lib/paths';
+  import { tr } from '../lib/i18n.svelte';
 
   function label(doc: Doc): string {
     const name = basename(doc.path);
@@ -11,22 +12,22 @@
 
   function menu(e: MouseEvent, doc: Doc) {
     store.openMenu(e, [
-      { label: '閉じる', shortcut: 'Ctrl+W', action: () => void store.closeTab(doc.path) },
+      { label: tr('閉じる', 'Close', '关闭'), shortcut: 'Ctrl+W', action: () => void store.closeTab(doc.path) },
       {
-        label: 'ほかのタブを閉じる',
+        label: tr('ほかのタブを閉じる', 'Close other tabs', '关闭其他标签页'),
         action: async () => {
           for (const d of store.docs.filter((x) => x !== doc)) await store.closeTab(d.path);
         },
       },
       {
-        label: 'すべて閉じる',
+        label: tr('すべて閉じる', 'Close all', '全部关闭'),
         action: async () => {
           for (const d of [...store.docs]) await store.closeTab(d.path);
         },
       },
       { label: '', separator: true },
-      { label: 'ツリーで表示', action: () => store.showLeft('files') },
-      { label: 'パスをコピー', action: () => void store.copyPath(doc.path, false) },
+      { label: tr('ツリーで表示', 'Reveal in tree', '在树中显示'), action: () => store.showLeft('files') },
+      { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(doc.path, false) },
     ]);
   }
 </script>
@@ -51,7 +52,7 @@
       <button
         class="close"
         class:dirty={doc.dirty}
-        title={doc.dirty ? '未保存（閉じると保存します）' : '閉じる'}
+        title={doc.dirty ? tr('未保存（閉じると保存します）', 'Unsaved (saved when closed)', '未保存（关闭时保存）') : tr('閉じる', 'Close', '关闭')}
         onclick={(e) => {
           e.stopPropagation();
           void store.closeTab(doc.path);

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
+  import { tr } from '../lib/i18n.svelte';
 </script>
 
 <div class="toasts" aria-live="polite">
   {#each store.toasts as t (t.id)}
     <div class="toast" class:error={t.kind === 'error'} role={t.kind === 'error' ? 'alert' : 'status'}>
       <span>{t.message}</span>
-      <button class="icon-btn" title="閉じる" onclick={() => (store.toasts = store.toasts.filter((x) => x.id !== t.id))}>✕</button>
+      <button class="icon-btn" title={tr('閉じる', 'Close', '关闭')} onclick={() => (store.toasts = store.toasts.filter((x) => x.id !== t.id))}>✕</button>
     </div>
   {/each}
 </div>

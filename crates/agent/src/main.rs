@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use markshell_core::paths::{normalize_rel, resolve, FilterConfig};
 use markshell_core::search::SearchOptions;
 use markshell_core::watch::WatchEvent;
-use markshell_core::{links, scan, search, watch};
+use markshell_core::{i18n, links, scan, search, tr, watch};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -52,7 +52,7 @@ impl Agent {
     }
 
     fn root(&self) -> Result<PathBuf, String> {
-        self.root.read().unwrap().clone().ok_or_else(|| "フォルダが開かれていません".into())
+        self.root.read().unwrap().clone().ok_or_else(|| tr!("フォルダが開かれていません", "No folder is open", "未打开文件夹"))
     }
 
     fn filter(&self) -> Arc<FilterConfig> {
@@ -76,11 +76,21 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
     match method {
         "ping" => Ok(json!({ "version": env!("CARGO_PKG_VERSION") })),
 
+        // 表示言語（エラーメッセージの言語）
+        "locale" => {
+            i18n::set_locale(i18n::parse(&param::<String>(params, "locale")?));
+            Ok(json!({}))
+        }
+
         // フォルダを開く。設定を受け取り、監視を張り直す
         "open" => {
+            if let Some(l) = params.get("locale").and_then(Value::as_str) {
+                i18n::set_locale(i18n::parse(l));
+            }
             let root = PathBuf::from(param::<String>(params, "root")?);
             if !root.is_dir() {
-                return Err(format!("フォルダが見つかりません: {}", root.display()));
+                let root = root.display();
+                return Err(tr!("フォルダが見つかりません: {root}", "Folder not found: {root}", "找不到文件夹：{root}"));
             }
             let filter = Arc::new(FilterConfig::from_config(params.get("config").unwrap_or(&Value::Null)));
             *agent.root.write().unwrap() = Some(root.clone());
@@ -91,7 +101,7 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
                 WatchEvent::Changes(changes) => emit("fs:change", json!({ "changes": changes })),
                 WatchEvent::Rescan => emit("fs:rescan", Value::Null),
             })
-            .map_err(|e| format!("変更の監視を始められません: {e}"))?;
+            .map_err(|e| tr!("変更の監視を始められません: {e}", "Cannot start watching for changes: {e}", "无法开始监视更改：{e}"))?;
             *agent.watcher.lock().unwrap() = Some(w);
             Ok(json!({}))
         }
@@ -165,12 +175,12 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
 
         // Windows のごみ箱は \\wsl.localhost のファイルを扱えないので、Linux のごみ箱に移す
         "trash" => {
-            let rel = normalize_rel(&param::<String>(params, "path")?).ok_or("不正なパスです")?;
+            let rel = normalize_rel(&param::<String>(params, "path")?).ok_or_else(markshell_core::paths::invalid_path)?;
             if rel.is_empty() {
-                return Err("ルートディレクトリは削除できません".into());
+                return Err(tr!("ルートディレクトリは削除できません", "The root directory cannot be deleted", "无法删除根目录"));
             }
             let p = resolve(&agent.root()?, &rel)?;
-            trash::delete(&p).map_err(|e| format!("ごみ箱へ移動できません: {e}"))?;
+            trash::delete(&p).map_err(|e| tr!("ごみ箱へ移動できません: {e}", "Cannot move to the trash: {e}", "无法移到回收站：{e}"))?;
             Ok(json!({}))
         }
 
@@ -195,14 +205,14 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
                 .args(["-u", &path])
                 .stdin(std::process::Stdio::null())
                 .output()
-                .map_err(|e| format!("wslpath を実行できません: {e}"))?;
+                .map_err(|e| tr!("wslpath を実行できません: {e}", "Cannot run wslpath: {e}", "无法运行 wslpath：{e}"))?;
             if !out.status.success() {
-                return Err(format!("パスを変換できません: {path}"));
+                return Err(tr!("パスを変換できません: {path}", "Cannot convert the path: {path}", "无法转换路径：{path}"));
             }
             Ok(json!(String::from_utf8_lossy(&out.stdout).trim()))
         }
 
-        _ => Err(format!("不明な要求です: {method}")),
+        _ => Err(tr!("不明な要求です: {method}", "Unknown request: {method}", "未知的请求：{method}")),
     }
 }
 

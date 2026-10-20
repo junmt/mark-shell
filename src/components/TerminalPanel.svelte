@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
   import TerminalView from './TerminalView.svelte';
+  import { tr } from '../lib/i18n.svelte';
 
   function newMenu(e: MouseEvent) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -27,10 +28,10 @@
         onclick={() => (store.activeTerminal = t.key)}
         onkeydown={(e) => e.key === 'Enter' && (store.activeTerminal = t.key)}
       >
-        <span class="title">{t.ai ? '✦ ' : ''}{t.title}{t.exited ? '（終了）' : ''}</span>
+        <span class="title">{t.ai ? '✦ ' : ''}{t.title}{t.exited ? tr('（終了）', ' (exited)', '（已退出）') : ''}</span>
         <button
           class="close"
-          title="閉じる"
+          title={tr('閉じる', 'Close', '关闭')}
           onclick={(e) => {
             e.stopPropagation();
             store.closeTerminal(t.key);
@@ -38,10 +39,10 @@
         >
       </div>
     {/each}
-    <button class="icon-btn" title="新しいターミナル" onclick={() => store.newTerminal()}>＋</button>
-    <button class="icon-btn" title="シェルや AI を選んで開く" onclick={newMenu}>▾</button>
+    <button class="icon-btn" title={tr('新しいターミナル', 'New terminal', '新建终端')} onclick={() => store.newTerminal()}>＋</button>
+    <button class="icon-btn" title={tr('シェルや AI を選んで開く', 'Choose a shell or AI tool to open', '选择要打开的 Shell 或 AI')} onclick={newMenu}>▾</button>
     <div class="spacer"></div>
-    <button class="icon-btn" title="ターミナルを隠す (Ctrl+`)" onclick={() => store.toggleTerminal()}>⌄</button>
+    <button class="icon-btn" title={tr('ターミナルを隠す (Ctrl+`)', 'Hide terminal (Ctrl+`)', '隐藏终端 (Ctrl+`)')} onclick={() => store.toggleTerminal()}>⌄</button>
   </div>
   <div class="views">
     {#each store.terminals as t (t.key)}
@@ -51,7 +52,7 @@
     {/each}
     {#if store.terminals.length === 0}
       <div class="empty">
-        <button class="btn" onclick={() => store.newTerminal()}>ターミナルを開く</button>
+        <button class="btn" onclick={() => store.newTerminal()}>{tr('ターミナルを開く', 'Open terminal', '打开终端')}</button>
       </div>
     {/if}
   </div>

@@ -1,13 +1,14 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
+  import { tr } from '../lib/i18n.svelte';
 
   function openFolderMenu(e: MouseEvent) {
     void api.getRecent().then((recent) => {
       const items: MenuItem[] = [
-        { label: 'フォルダを開く…', shortcut: 'Ctrl+O', action: () => void store.chooseRoot() },
-        { label: '最近開いたフォルダから選ぶ…', shortcut: 'Ctrl+R', action: () => void store.chooseRecentRoot() },
-        { label: '新しいウィンドウ', action: () => void api.openNewWindow() },
+        { label: tr('フォルダを開く…', 'Open folder…', '打开文件夹…'), shortcut: 'Ctrl+O', action: () => void store.chooseRoot() },
+        { label: tr('最近開いたフォルダから選ぶ…', 'Open recent folder…', '从最近打开的文件夹中选择…'), shortcut: 'Ctrl+R', action: () => void store.chooseRecentRoot() },
+        { label: tr('新しいウィンドウ', 'New window', '新建窗口'), action: () => void api.openNewWindow() },
       ];
       if (recent.length) {
         items.push({ label: '', separator: true });
@@ -22,37 +23,37 @@
     const found = store.aiTools.filter((t) => t.found);
     const missing = store.aiTools.filter((t) => !t.found);
     const items: MenuItem[] = [];
-    if (found.length === 0) items.push({ label: 'インストール済みの AI ツールが見つかりません', disabled: true });
+    if (found.length === 0) items.push({ label: tr('インストール済みの AI ツールが見つかりません', 'No installed AI tools found', '未找到已安装的 AI 工具'), disabled: true });
     for (const t of found) {
-      items.push({ label: `${t.name} を起動`, action: () => void store.launchTool(t) });
+      items.push({ label: tr(`${t.name} を起動`, `Launch ${t.name}`, `启动 ${t.name}`), action: () => void store.launchTool(t) });
       if (store.activeDoc) {
         for (const a of t.actions) items.push({ label: `　${a.label}`, action: () => void store.launchTool(t, a.id) });
       }
     }
     if (missing.length) {
       items.push({ label: '', separator: true });
-      for (const t of missing) items.push({ label: `${t.name}（未インストール）`, action: () => void store.launchTool(t) });
+      for (const t of missing) items.push({ label: tr(`${t.name}（未インストール）`, `${t.name} (not installed)`, `${t.name}（未安装）`), action: () => void store.launchTool(t) });
     }
     items.push({ label: '', separator: true });
-    items.push({ label: 'AI 向けの説明ファイルを作成', action: () => void store.createAiGuide() });
-    items.push({ label: 'AI ツールを探し直す', action: () => void store.refreshAiTools() });
+    items.push({ label: tr('AI 向けの説明ファイルを作成', 'Create AI guide file', '创建面向 AI 的说明文件'), action: () => void store.createAiGuide() });
+    items.push({ label: tr('AI ツールを探し直す', 'Rescan AI tools', '重新查找 AI 工具'), action: () => void store.refreshAiTools() });
     store.menu = { x: Math.min(rect.left, window.innerWidth - 300), y: rect.bottom + 2, items };
   }
 </script>
 
 <header class="toolbar">
-  <button class="icon-btn" title="左ペイン (Ctrl+Shift+E)" class:on={store.leftVisible} onclick={() => store.toggleLeft()} disabled={!store.root}>☰</button>
-  <button class="folder" onclick={openFolderMenu} title="フォルダを開く (Ctrl+O)">
-    📁 {store.root ? store.rootName : 'フォルダを開く'} ▾
+  <button class="icon-btn" title={tr('左ペイン (Ctrl+Shift+E)', 'Side panel (Ctrl+Shift+E)', '左侧面板 (Ctrl+Shift+E)')} class:on={store.leftVisible} onclick={() => store.toggleLeft()} disabled={!store.root}>☰</button>
+  <button class="folder" onclick={openFolderMenu} title={tr('フォルダを開く (Ctrl+O)', 'Open folder (Ctrl+O)', '打开文件夹 (Ctrl+O)')}>
+    📁 {store.root ? store.rootName : tr('フォルダを開く', 'Open folder', '打开文件夹')} ▾
   </button>
   <div class="spacer"></div>
   {#if store.root}
-    <button class="icon-btn" title="新しいファイル (Ctrl+N)" onclick={() => void store.newFile()}>＋ 新規</button>
-    <button class="icon-btn" title="コマンドパレット (Ctrl+Shift+P)" onclick={() => (store.palette = 'commands')}>⌘ コマンド</button>
-    <button class="icon-btn" class:on={store.terminalVisible} title="ターミナル (Ctrl+`)" onclick={() => store.toggleTerminal()}>&gt;_ ターミナル</button>
-    <button class="icon-btn ai" title="AI ツール" onclick={openAiMenu}>✦ AI ▾</button>
+    <button class="icon-btn" title={tr('新しいファイル (Ctrl+N)', 'New file (Ctrl+N)', '新建文件 (Ctrl+N)')} onclick={() => void store.newFile()}>＋ {tr('新規', 'New', '新建')}</button>
+    <button class="icon-btn" title={tr('コマンドパレット (Ctrl+Shift+P)', 'Command palette (Ctrl+Shift+P)', '命令面板 (Ctrl+Shift+P)')} onclick={() => (store.palette = 'commands')}>⌘ {tr('コマンド', 'Commands', '命令')}</button>
+    <button class="icon-btn" class:on={store.terminalVisible} title={tr('ターミナル (Ctrl+`)', 'Terminal (Ctrl+`)', '终端 (Ctrl+`)')} onclick={() => store.toggleTerminal()}>&gt;_ {tr('ターミナル', 'Terminal', '终端')}</button>
+    <button class="icon-btn ai" title={tr('AI ツール', 'AI tools', 'AI 工具')} onclick={openAiMenu}>✦ AI ▾</button>
   {/if}
-  <button class="icon-btn" title="設定 (Ctrl+,)" onclick={() => (store.settingsOpen = true)}>⚙</button>
+  <button class="icon-btn" title={tr('設定 (Ctrl+,)', 'Settings (Ctrl+,)', '设置 (Ctrl+,)')} onclick={() => (store.settingsOpen = true)}>⚙</button>
 </header>
 
 <style>

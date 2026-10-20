@@ -4,6 +4,7 @@
   import DocView from './DocView.svelte';
   import TerminalPanel from './TerminalPanel.svelte';
   import Splitter from './Splitter.svelte';
+  import { tr } from '../lib/i18n.svelte';
 
   let paneHeight = $state(600);
 </script>
@@ -17,12 +18,12 @@
       {/key}
     {:else}
       <div class="empty">
-        <p>左のツリーからファイルを選ぶと、ここで編集できます。</p>
+        <p>{tr('左のツリーからファイルを選ぶと、ここで編集できます。', 'Select a file in the tree on the left to edit it here.', '从左侧树中选择文件即可在此编辑。')}</p>
         <p class="keys">
-          <kbd>Ctrl</kbd>+<kbd>P</kbd> ファイルを名前で開く
-          <kbd>Ctrl</kbd>+<kbd>N</kbd> 新しいファイル
-          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> 全文検索
-          <kbd>Ctrl</kbd>+<kbd>`</kbd> ターミナル
+          <kbd>Ctrl</kbd>+<kbd>P</kbd> {tr('ファイルを名前で開く', 'Open file by name', '按名称打开文件')}
+          <kbd>Ctrl</kbd>+<kbd>N</kbd> {tr('新しいファイル', 'New file', '新建文件')}
+          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> {tr('全文検索', 'Search in files', '全文搜索')}
+          <kbd>Ctrl</kbd>+<kbd>`</kbd> {tr('ターミナル', 'Terminal', '终端')}
         </p>
       </div>
     {/if}

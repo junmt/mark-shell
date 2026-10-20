@@ -33,6 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             config::get_config,
             config::set_config,
+            config::set_locale,
             config::load_workspace_state,
             config::save_workspace_state,
             config::get_recent,

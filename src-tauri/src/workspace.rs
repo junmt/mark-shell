@@ -9,6 +9,7 @@ use std::sync::Arc;
 use base64::Engine;
 use markshell_core::links::Plan;
 use markshell_core::scan::{self, Entry};
+use markshell_core::tr;
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -83,7 +84,7 @@ fn open_root_blocking(app: &AppHandle, path: &str) -> Result<OpenResult, String>
     let state = app.state::<AppState>();
     let p = std::path::absolute(PathBuf::from(path)).map_err(|e| e.to_string())?;
     if !p.is_dir() {
-        return Err(format!("フォルダが見つかりません: {path}"));
+        return Err(tr!("フォルダが見つかりません: {path}", "Folder not found: {path}", "找不到文件夹：{path}"));
     }
     // WSL のフォルダなら、探索・検索・監視を WSL のエージェントに任せる
     let (wsl_root, wsl_error) = match wsl::parse_unc(&p.to_string_lossy()) {
@@ -144,18 +145,25 @@ const NOT_TEXT_PREFIX: &str = "not-text:";
 pub fn read_file(state: State<'_, AppState>, path: String) -> Result<ReadResult, String> {
     let root = state.root()?;
     let p = resolve(&root, &path)?;
-    let meta = fs::metadata(&p).map_err(|e| format!("{path} を開けません: {e}"))?;
+    let meta = fs::metadata(&p).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))?;
     // 先頭の NOT_TEXT_PREFIX を見て、画面側は既定のアプリで開くか尋ねる
     if meta.len() > MAX_OPEN_BYTES {
-        return Err(format!(
-            "{NOT_TEXT_PREFIX}{path} は大きすぎるためエディタでは開けません（{} MB。開けるのは {} MB まで）",
-            meta.len() / 1024 / 1024,
-            MAX_OPEN_BYTES / 1024 / 1024
-        ));
+        let (size, max) = (meta.len() / 1024 / 1024, MAX_OPEN_BYTES / 1024 / 1024);
+        let msg = tr!(
+            "{path} は大きすぎるためエディタでは開けません（{size} MB。開けるのは {max} MB まで）",
+            "{path} is too large to open in the editor ({size} MB; the limit is {max} MB)",
+            "{path} 太大，无法在编辑器中打开（{size} MB，上限为 {max} MB）"
+        );
+        return Err(format!("{NOT_TEXT_PREFIX}{msg}"));
     }
-    let bytes = fs::read(&p).map_err(|e| format!("{path} を読めません: {e}"))?;
+    let bytes = fs::read(&p).map_err(|e| tr!("{path} を読めません: {e}", "Cannot read {path}: {e}", "无法读取 {path}：{e}"))?;
     if textio::looks_binary(&bytes) {
-        return Err(format!("{NOT_TEXT_PREFIX}{path} はテキストファイルではないため、エディタでは開けません"));
+        let msg = tr!(
+            "{path} はテキストファイルではないため、エディタでは開けません",
+            "{path} is not a text file, so it cannot be opened in the editor",
+            "{path} 不是文本文件，无法在编辑器中打开"
+        );
+        return Err(format!("{NOT_TEXT_PREFIX}{msg}"));
     }
     let d = textio::decode(&bytes);
     Ok(ReadResult {
@@ -174,24 +182,24 @@ pub fn write_file(state: State<'_, AppState>, path: String, content: String, enc
     let p = resolve(&root, &path)?;
     if let Ok(meta) = fs::metadata(&p) {
         if meta.permissions().readonly() {
-            return Err("読み取り専用のファイルです".into());
+            return Err(tr!("読み取り専用のファイルです", "The file is read-only", "该文件为只读文件"));
         }
     }
     let bytes = textio::encode(&content, &encoding, &eol)?;
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    textio::write_atomic(&p, &bytes).map_err(|e| format!("{path} を保存できません: {e}"))?;
+    textio::write_atomic(&p, &bytes).map_err(|e| tr!("{path} を保存できません: {e}", "Cannot save {path}: {e}", "无法保存 {path}：{e}"))?;
     Ok(fs::metadata(&p).map(|m| mtime_ms(&m)).unwrap_or(0))
 }
 
 #[tauri::command]
 pub fn create_file(state: State<'_, AppState>, path: String, content: Option<String>) -> Result<String, String> {
     let root = state.root()?;
-    let rel = normalize_rel(&path).ok_or("不正なパスです")?;
+    let rel = normalize_rel(&path).ok_or_else(paths::invalid_path)?;
     let p = resolve(&root, &rel)?;
     if p.exists() {
-        return Err(format!("{rel} は既にあります"));
+        return Err(tr!("{rel} は既にあります", "{rel} already exists", "{rel} 已存在"));
     }
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -203,10 +211,10 @@ pub fn create_file(state: State<'_, AppState>, path: String, content: Option<Str
 #[tauri::command]
 pub fn create_dir(state: State<'_, AppState>, path: String) -> Result<String, String> {
     let root = state.root()?;
-    let rel = normalize_rel(&path).ok_or("不正なパスです")?;
+    let rel = normalize_rel(&path).ok_or_else(paths::invalid_path)?;
     let p = resolve(&root, &rel)?;
     if p.exists() {
-        return Err(format!("{rel} は既にあります"));
+        return Err(tr!("{rel} は既にあります", "{rel} already exists", "{rel} 已存在"));
     }
     fs::create_dir_all(&p).map_err(|e| e.to_string())?;
     Ok(rel)
@@ -245,24 +253,28 @@ pub struct RenameResult {
 #[tauri::command]
 pub async fn rename_path(app: AppHandle, from: String, to: String, rewrite_links: bool) -> Result<RenameResult, String> {
     let root = app.state::<AppState>().root()?;
-    let from = normalize_rel(&from).ok_or("不正なパスです")?;
-    let to = normalize_rel(&to).ok_or("不正なパスです")?;
+    let from = normalize_rel(&from).ok_or_else(paths::invalid_path)?;
+    let to = normalize_rel(&to).ok_or_else(paths::invalid_path)?;
     if to.is_empty() || from.is_empty() {
-        return Err("不正なパスです".into());
+        return Err(paths::invalid_path());
     }
     if to.to_lowercase().starts_with(&(from.to_lowercase() + "/")) {
-        return Err("フォルダをその中に移動することはできません".into());
+        return Err(tr!(
+            "フォルダをその中に移動することはできません",
+            "A folder cannot be moved into itself",
+            "无法将文件夹移动到其自身内部"
+        ));
     }
     let src = resolve(&root, &from)?;
     let dst = resolve(&root, &to)?;
     let case_only = from.eq_ignore_ascii_case(&to);
     if dst.exists() && !case_only {
-        return Err(format!("{to} は既にあります"));
+        return Err(tr!("{to} は既にあります", "{to} already exists", "{to} 已存在"));
     }
     if let Some(dir) = dst.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    fs::rename(&src, &dst).map_err(|e| format!("移動できません: {e}"))?;
+    fs::rename(&src, &dst).map_err(|e| tr!("移動できません: {e}", "Cannot move: {e}", "无法移动：{e}"))?;
 
     let (links, files) = if rewrite_links {
         let r = link_plan(&app, from.clone(), to.clone(), true).await?;
@@ -276,16 +288,16 @@ pub async fn rename_path(app: AppHandle, from: String, to: String, rewrite_links
 #[tauri::command]
 pub fn delete_path(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let root = state.root()?;
-    let rel = normalize_rel(&path).ok_or("不正なパスです")?;
+    let rel = normalize_rel(&path).ok_or_else(paths::invalid_path)?;
     if rel.is_empty() {
-        return Err("ルートディレクトリは削除できません".into());
+        return Err(tr!("ルートディレクトリは削除できません", "The root directory cannot be deleted", "无法删除根目录"));
     }
     // Windows のごみ箱は \\wsl.localhost のファイルを扱えないので、WSL では Linux のごみ箱に移す
     if let Some(wsl) = state.wsl() {
         return wsl.agent.request("trash", json!({ "path": rel })).map(|_| ());
     }
     let p = resolve(&root, &rel)?;
-    trash::delete(&p).map_err(|e| format!("ごみ箱へ移動できません: {e}"))
+    trash::delete(&p).map_err(|e| tr!("ごみ箱へ移動できません: {e}", "Cannot move to the Recycle Bin: {e}", "无法移到回收站：{e}"))
 }
 
 /// 空いている名前を探す: `name (2).md` のように番号を付ける
@@ -309,7 +321,7 @@ fn unique_path(root: &Path, rel: &str, suffix: &str) -> Result<String, String> {
             return Ok(c);
         }
     }
-    Err("空いているファイル名が見つかりません".into())
+    Err(tr!("空いているファイル名が見つかりません", "No available file name was found", "找不到可用的文件名"))
 }
 
 fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -328,8 +340,9 @@ fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[tauri::command]
 pub fn duplicate_path(state: State<'_, AppState>, path: String) -> Result<String, String> {
     let root = state.root()?;
-    let rel = normalize_rel(&path).ok_or("不正なパスです")?;
-    let target = unique_path(&root, &rel, " のコピー")?;
+    let rel = normalize_rel(&path).ok_or_else(paths::invalid_path)?;
+    let suffix = tr!(" のコピー", " copy", " 副本");
+    let target = unique_path(&root, &rel, &suffix)?;
     copy_recursive(&resolve(&root, &rel)?, &resolve(&root, &target)?).map_err(|e| e.to_string())?;
     Ok(target)
 }
@@ -344,7 +357,7 @@ fn next_asset_path(root: &Path, note: &str, folder: &str, ext: &str) -> Result<S
             return Ok(rel);
         }
     }
-    Err("空いているファイル名が見つかりません".into())
+    Err(tr!("空いているファイル名が見つかりません", "No available file name was found", "找不到可用的文件名"))
 }
 
 fn sanitize_ext(ext: &str) -> String {
@@ -418,7 +431,7 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Result<()
 pub fn open_with_default_app(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let root = state.root()?;
     let p = resolve(&root, &path)?;
-    tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| format!("{path} を開けません: {e}"))
+    tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))
 }
 
 /// インストーラーで入れたものか（隣にアンインストーラーがある）。

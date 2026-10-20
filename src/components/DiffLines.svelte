@@ -1,5 +1,6 @@
 <script lang="ts">
   import { diffLines } from 'diff';
+  import { tr } from '../lib/i18n.svelte';
 
   let { before, after, beforeLabel, afterLabel }: { before: string; after: string; beforeLabel: string; afterLabel: string } = $props();
 
@@ -13,7 +14,7 @@
       const rows = part.value.replace(/\n$/, '').split('\n');
       if (kind === 'same' && rows.length > 7) {
         rows.slice(0, 3).forEach((t) => out.push({ kind, text: t }));
-        out.push({ kind: 'gap', text: `… ${rows.length - 6} 行は同じ …` });
+        out.push({ kind: 'gap', text: tr(`… ${rows.length - 6} 行は同じ …`, `… ${rows.length - 6} unchanged lines …`, `… ${rows.length - 6} 行相同 …`) });
         rows.slice(-3).forEach((t) => out.push({ kind, text: t }));
       } else {
         rows.forEach((t) => out.push({ kind, text: t }));

@@ -1,8 +1,11 @@
 // アプリの設定（%APPDATA%\mark-shell\config.json）
 
 import type { CustomColors } from './themes';
+import type { LanguageSetting } from './i18n.svelte';
 
 export type Config = {
+  /** 表示言語: 'system'（PC の言語。日本語・中国語以外は英語）、'ja'、'en'、'zh' */
+  language: LanguageSetting;
   /** 配色: 'system'（Windows の設定でライト / ダーク）、プリセット名（themes.ts）、'custom' */
   theme: string;
   /** theme が 'custom' のときの配色（元にするプリセットと、変えた色） */
@@ -35,6 +38,7 @@ export type Config = {
 };
 
 export const defaultConfig: Config = {
+  language: 'system',
   theme: 'system',
   customColors: { base: 'light', colors: {} },
   uiFontFamily: '',

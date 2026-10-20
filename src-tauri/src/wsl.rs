@@ -15,6 +15,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
+use markshell_core::tr;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -76,7 +77,7 @@ fn deploy(distro: &str, name: &str) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("wsl.exe を起動できません: {e}"))?
+        .map_err(|e| tr!("wsl.exe を起動できません: {e}", "Cannot start wsl.exe: {e}", "无法启动 wsl.exe：{e}"))?
         .success();
     if installed {
         return Ok(());
@@ -91,11 +92,15 @@ fn deploy(distro: &str, name: &str) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("wsl.exe を起動できません: {e}"))?;
-    child.stdin.take().unwrap().write_all(AGENT_BIN).map_err(|e| format!("WSL にエージェントを置けません: {e}"))?;
+        .map_err(|e| tr!("wsl.exe を起動できません: {e}", "Cannot start wsl.exe: {e}", "无法启动 wsl.exe：{e}"))?;
+    child.stdin.take().unwrap().write_all(AGENT_BIN).map_err(|e| {
+        tr!("WSL にエージェントを置けません: {e}", "Cannot install the agent in WSL: {e}", "无法在 WSL 中安装代理程序：{e}")
+    })?;
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     if !out.status.success() {
-        return Err(format!("WSL にエージェントを置けません: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        let e = String::from_utf8_lossy(&out.stderr);
+        let e = e.trim();
+        return Err(tr!("WSL にエージェントを置けません: {e}", "Cannot install the agent in WSL: {e}", "无法在 WSL 中安装代理程序：{e}"));
     }
     Ok(())
 }
@@ -113,7 +118,11 @@ pub struct Agent {
 impl Agent {
     fn start(app: &AppHandle, distro: &str) -> Result<Arc<Agent>, String> {
         if !agent_available() {
-            return Err("この版には WSL 用のエージェントが含まれていません".into());
+            return Err(tr!(
+                "この版には WSL 用のエージェントが含まれていません",
+                "This build does not include the WSL agent",
+                "此版本不包含 WSL 代理程序"
+            ));
         }
         let name = agent_file_name();
         deploy(distro, &name)?;
@@ -123,7 +132,7 @@ impl Agent {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("WSL のエージェントを起動できません: {e}"))?;
+            .map_err(|e| tr!("WSL のエージェントを起動できません: {e}", "Cannot start the WSL agent: {e}", "无法启动 WSL 代理程序：{e}"))?;
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
@@ -166,7 +175,11 @@ impl Agent {
     /// 要求を送り、応答を待つ
     pub fn request(&self, method: &str, params: Value) -> Result<Value, String> {
         if !self.alive.load(Ordering::SeqCst) {
-            return Err("WSL のエージェントが終了しています。フォルダを開き直してください".into());
+            return Err(tr!(
+                "WSL のエージェントが終了しています。フォルダを開き直してください",
+                "The WSL agent has exited. Please reopen the folder",
+                "WSL 代理程序已退出。请重新打开文件夹"
+            ));
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
@@ -176,10 +189,10 @@ impl Agent {
             let mut stdin = self.stdin.lock().unwrap();
             if writeln!(stdin, "{line}").and_then(|_| stdin.flush()).is_err() {
                 self.pending.lock().unwrap().remove(&id);
-                return Err("WSL のエージェントに送れません".into());
+                return Err(tr!("WSL のエージェントに送れません", "Cannot send to the WSL agent", "无法向 WSL 代理程序发送请求"));
             }
         }
-        rx.recv().map_err(|_| "WSL のエージェントが終了しました".to_string())?
+        rx.recv().map_err(|_| tr!("WSL のエージェントが終了しました", "The WSL agent exited", "WSL 代理程序已退出"))?
     }
 }
 
@@ -222,7 +235,8 @@ impl WslRoot {
     /// エージェントでフォルダを開く（監視も始まる）
     pub fn open(app: &AppHandle, distro: &str, linux_root: &str, config: &Value) -> Result<Arc<WslRoot>, String> {
         let agent = agent_for(app, distro)?;
-        agent.request("open", json!({ "root": linux_root, "config": config }))?;
+        let locale = markshell_core::i18n::code(markshell_core::i18n::locale());
+        agent.request("open", json!({ "root": linux_root, "config": config, "locale": locale }))?;
         Ok(Arc::new(WslRoot { distro: distro.into(), linux_root: linux_root.into(), agent, linux_paths: Mutex::default() }))
     }
 
@@ -245,7 +259,7 @@ impl WslRoot {
             return Ok(p.clone());
         }
         let p = self.agent.request("wslpath", json!({ "path": win.to_string_lossy() }))?;
-        let p = p.as_str().ok_or("パスを変換できません")?.to_string();
+        let p = p.as_str().ok_or_else(|| tr!("パスを変換できません", "Cannot convert the path", "无法转换路径"))?.to_string();
         self.linux_paths.lock().unwrap().insert(win.to_path_buf(), p.clone());
         Ok(p)
     }

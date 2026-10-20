@@ -69,7 +69,7 @@ pub fn encode(text: &str, encoding: &str, eol: &str) -> Result<Vec<u8>, String> 
         }
         label => {
             let enc = encoding_rs::Encoding::for_label(label.as_bytes())
-                .ok_or_else(|| format!("未対応の文字コードです: {label}"))?;
+                .ok_or_else(|| crate::tr!("未対応の文字コードです: {label}", "Unsupported encoding: {label}", "不支持的字符编码：{label}"))?;
             let (bytes, _, had_errors) = enc.encode(&text);
             if had_errors {
                 return Err("unmappable".into());
@@ -81,7 +81,7 @@ pub fn encode(text: &str, encoding: &str, eol: &str) -> Result<Vec<u8>, String> 
 
 /// 一時ファイルに書いてから置き換える。途中で落ちても元のファイルは壊れない
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().ok_or_else(|| std::io::Error::other("親フォルダがありません"))?;
+    let dir = path.parent().ok_or_else(|| std::io::Error::other(crate::tr!("親フォルダがありません", "No parent folder", "没有父文件夹")))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = dir.join(format!(".{name}.mark-shell.tmp"));
     {

@@ -31,6 +31,7 @@ import {
 } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
 import { basename, dirname, encodeLinkTarget, relative, stem } from './paths';
+import { tr } from './i18n.svelte';
 
 export const lineNumbersComp = new Compartment();
 export const wrapComp = new Compartment();
@@ -332,7 +333,7 @@ function markdownExtensions(hooks: EditorHooks): Extension[] {
     autocompletion({ override: [linkCompletion(hooks)], activateOnTyping: true, icons: false }),
     // 先頭の --- で囲まれたフロントマターは YAML として色付けする
     yamlFrontmatter({ content: markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }) }),
-    placeholder('ここに Markdown で書きます'),
+    placeholder(tr('ここに Markdown で書きます', 'Write Markdown here', '在此输入 Markdown')),
     Prec.high(
       keymap.of([
         { key: 'Mod-b', run: wrapWith('**') },

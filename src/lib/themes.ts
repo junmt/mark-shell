@@ -1,6 +1,8 @@
 // 配色。プリセットと、プリセットを元に色を変えるカスタム。
 // 基本の色（背景・文字・強調色など）から、ホバーや選択などの中間の色を計算して CSS 変数にする
 
+import { tr } from './i18n.svelte';
+
 /** カスタムで変えられる色 */
 export const COLOR_KEYS = [
   'bg',
@@ -17,22 +19,37 @@ export const COLOR_KEYS = [
 ] as const;
 export type ColorKey = (typeof COLOR_KEYS)[number];
 
-export const COLOR_LABELS: Record<ColorKey, string> = {
-  bg: '背景（エディタ・プレビュー）',
-  bgPane: 'パネルの背景（ツリー・タブ・ツールバー）',
-  fg: '文字',
-  fgMuted: '薄い文字',
-  border: '枠線',
-  accent: '強調色（ボタン・選択）',
-  mdHeading: '見出し',
-  mdLink: 'リンク',
-  mdCode: 'コード',
-  terminalBg: 'ターミナルの背景',
-  terminalFg: 'ターミナルの文字',
-};
+/** カスタムで変えられる色の名前（表示言語に合わせる） */
+export function colorLabel(k: ColorKey): string {
+  switch (k) {
+    case 'bg':
+      return tr('背景（エディタ・プレビュー）', 'Background (editor, preview)', '背景（编辑器、预览）');
+    case 'bgPane':
+      return tr('パネルの背景（ツリー・タブ・ツールバー）', 'Panel background (tree, tabs, toolbar)', '面板背景（文件树、标签页、工具栏）');
+    case 'fg':
+      return tr('文字', 'Text', '文字');
+    case 'fgMuted':
+      return tr('薄い文字', 'Muted text', '次要文字');
+    case 'border':
+      return tr('枠線', 'Border', '边框');
+    case 'accent':
+      return tr('強調色（ボタン・選択）', 'Accent (buttons, selection)', '强调色（按钮、选中项）');
+    case 'mdHeading':
+      return tr('見出し', 'Headings', '标题');
+    case 'mdLink':
+      return tr('リンク', 'Links', '链接');
+    case 'mdCode':
+      return tr('コード', 'Code', '代码');
+    case 'terminalBg':
+      return tr('ターミナルの背景', 'Terminal background', '终端背景');
+    case 'terminalFg':
+      return tr('ターミナルの文字', 'Terminal text', '终端文字');
+  }
+}
 
 type Preset = {
-  label: string;
+  /** 表示名（表示言語に合わせるので関数にする） */
+  label: () => string;
   dark: boolean;
   colors: Record<ColorKey, string>;
   /** 計算で作る色を、決まった値にしたいとき（CSS 変数名から -- を除いたもの） */
@@ -61,7 +78,7 @@ const DARK_CODE = {
 
 export const PRESETS: Record<string, Preset> = {
   light: {
-    label: 'ライト',
+    label: () => tr('ライト', 'Light', '浅色'),
     dark: false,
     colors: {
       bg: '#ffffff',
@@ -87,7 +104,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   dark: {
-    label: 'ダーク',
+    label: () => tr('ダーク', 'Dark', '深色'),
     dark: true,
     colors: {
       bg: '#1e1f22',
@@ -113,7 +130,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   sepia: {
-    label: 'セピア',
+    label: () => tr('セピア', 'Sepia', '棕褐色'),
     dark: false,
     colors: {
       bg: '#f8f1e3',
@@ -130,7 +147,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   'solarized-light': {
-    label: 'Solarized ライト',
+    label: () => tr('Solarized ライト', 'Solarized Light', 'Solarized 浅色'),
     dark: false,
     colors: {
       bg: '#fdf6e3',
@@ -147,7 +164,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   'solarized-dark': {
-    label: 'Solarized ダーク',
+    label: () => tr('Solarized ダーク', 'Solarized Dark', 'Solarized 深色'),
     dark: true,
     colors: {
       bg: '#002b36',
@@ -164,7 +181,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   nord: {
-    label: 'Nord',
+    label: () => 'Nord',
     dark: true,
     colors: {
       bg: '#2e3440',
@@ -181,7 +198,7 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
   'high-contrast': {
-    label: 'ハイコントラスト',
+    label: () => tr('ハイコントラスト', 'High contrast', '高对比度'),
     dark: true,
     colors: {
       bg: '#000000',
@@ -198,6 +215,11 @@ export const PRESETS: Record<string, Preset> = {
     },
   },
 };
+
+/** プリセットの表示名 */
+export function presetLabel(id: string): string {
+  return PRESETS[id]?.label() ?? id;
+}
 
 export type CustomColors = {
   /** 元にするプリセット */

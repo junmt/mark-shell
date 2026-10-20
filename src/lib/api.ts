@@ -88,6 +88,7 @@ export const api = {
   absolutePath: (path: string) => invoke<string>('absolute_path', { path }),
   openNewWindow: (path?: string) => invoke<void>('open_new_window', { path }),
   isInstalled: () => invoke<boolean>('is_installed'),
+  setLocale: (locale: string) => invoke<void>('set_locale', { locale }),
   openWithDefaultApp: (path: string) => invoke<void>('open_with_default_app', { path }),
 
   searchStart: (options: SearchOptions) => invoke<number>('search_start', { options }),

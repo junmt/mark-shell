@@ -1,6 +1,7 @@
 // プレビューの後処理: コードのハイライト（Shiki）と図（Mermaid）。どちらも必要になったときに読み込む
 
 import type { HighlighterGeneric } from 'shiki';
+import { tr } from './i18n.svelte';
 
 type Highlighter = HighlighterGeneric<string, string>;
 
@@ -96,7 +97,8 @@ export async function enhance(container: HTMLElement, dark: boolean, isCurrent: 
       if (!isCurrent()) return;
       div.classList.add('mermaid-error');
       const pre = document.createElement('pre');
-      pre.textContent = `図を描画できません: ${e instanceof Error ? e.message : String(e)}\n\n${src}`;
+      const msg = e instanceof Error ? e.message : String(e);
+      pre.textContent = `${tr(`図を描画できません: ${msg}`, `Cannot render diagram: ${msg}`, `无法绘制图表: ${msg}`)}\n\n${src}`;
       div.replaceChildren(pre);
       // Mermaid が失敗時に body に残す要素を消す
       document.querySelectorAll('body > [id^="dmermaid-"]').forEach((n) => n.remove());

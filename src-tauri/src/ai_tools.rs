@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use markshell_core::i18n::{self, Locale};
+use markshell_core::tr;
 use serde::{Deserialize, Serialize};
 
 use crate::config::config_dir;
@@ -62,6 +64,44 @@ const DEFAULT_TOOLS: &str = r#"{
   ]
 }
 "#;
+
+/// DEFAULT_TOOLS の日本語の文言と、その英語・中国語訳。
+/// ai-tools.json は一度書き出すと日本語のまま残るので、使うときに既定の文言と同じなら今の言語に置き換える
+/// （ユーザーが書き換えた文言はそのまま）
+const BUILTIN_TEXTS: &[(&str, &str, &str)] = &[
+    ("このファイルを要約する", "Summarize this file", "总结此文件"),
+    ("このファイルを推敲する", "Polish this file", "润色此文件"),
+    ("選択範囲について聞く", "Ask about the selection", "询问所选内容"),
+    ("このファイルを開く", "Open this file", "打开此文件"),
+    (
+        "${noteRelativePath} を読んで、要点をまとめてください",
+        "Read ${noteRelativePath} and summarize the key points",
+        "请阅读 ${noteRelativePath} 并总结要点",
+    ),
+    (
+        "${noteRelativePath} の誤字脱字や分かりにくい表現を直してください",
+        "Fix typos and unclear wording in ${noteRelativePath}",
+        "请修正 ${noteRelativePath} 中的错别字和表达不清的地方",
+    ),
+    (
+        "${selectionFile} に、${noteRelativePath} から選択した部分を書き出しました。この部分について説明してください",
+        "I saved the part selected from ${noteRelativePath} to ${selectionFile}. Please explain this part",
+        "已将从 ${noteRelativePath} 中选中的部分写入 ${selectionFile}。请解释这部分内容",
+    ),
+];
+
+/// 既定の文言なら指定の言語に訳す。それ以外はそのまま
+fn localize_builtin(text: &str, l: Locale) -> String {
+    match BUILTIN_TEXTS.iter().find(|(ja, _, _)| *ja == text) {
+        Some((ja, en, zh)) => match l {
+            Locale::Ja => ja,
+            Locale::En => en,
+            Locale::Zh => zh,
+        }
+        .to_string(),
+        None => text.to_string(),
+    }
+}
 
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -196,7 +236,7 @@ fn detect(tool: &ToolDef) -> Option<PathBuf> {
 }
 
 pub fn get(id: &str) -> Result<ToolDef, String> {
-    load().into_iter().find(|t| t.id == id).ok_or_else(|| format!("AI ツール {id} が定義されていません"))
+    load().into_iter().find(|t| t.id == id).ok_or_else(|| tr!("AI ツール {id} が定義されていません", "AI tool {id} is not defined", "未定义 AI 工具 {id}"))
 }
 
 impl ToolDef {
@@ -217,7 +257,14 @@ pub fn find(id: &str) -> Result<(ToolDef, PathBuf), String> {
         Some(c) => which::which(c).ok().or_else(|| Some(PathBuf::from(expand_env(c)))).filter(|p| p.exists()),
         None => detect(&tool),
     }
-    .ok_or_else(|| format!("{} が見つかりません。インストールされているか確認してください", tool.name))?;
+    .ok_or_else(|| {
+        let name = &tool.name;
+        tr!(
+            "{name} が見つかりません。インストールされているか確認してください",
+            "{name} was not found. Check that it is installed",
+            "找不到 {name}。请确认是否已安装"
+        )
+    })?;
     Ok((tool, path))
 }
 
@@ -262,10 +309,19 @@ impl Vars {
 /// 選んだ操作の引数（操作が未指定ならツール既定の引数）
 pub fn args_for(tool: &ToolDef, action: Option<&str>, vars: &Vars) -> Result<Vec<String>, String> {
     let raw = match action {
-        Some(a) => &tool.actions.iter().find(|x| x.id == a).ok_or_else(|| format!("操作 {a} が定義されていません"))?.args,
+        Some(a) => {
+            &tool
+                .actions
+                .iter()
+                .find(|x| x.id == a)
+                .ok_or_else(|| tr!("操作 {a} が定義されていません", "Action {a} is not defined", "未定义操作 {a}"))?
+                .args
+        }
         None => &tool.launch.args,
     };
-    Ok(raw.iter().map(|a| vars.expand(a)).collect())
+    // 既定の文言（日本語）は今の言語に訳してから変数を展開する
+    let l = i18n::locale();
+    Ok(raw.iter().map(|a| vars.expand(&localize_builtin(a, l))).collect())
 }
 
 /// PowerShell の単一引用符文字列（中身はそのまま渡る）
@@ -277,6 +333,7 @@ pub fn ps_quote(s: &str) -> String {
 pub async fn list_ai_tools(app: tauri::AppHandle) -> Vec<ToolInfo> {
     use tauri::Manager;
     let wsl = app.state::<crate::state::AppState>().wsl();
+    let l = i18n::locale();
     tauri::async_runtime::spawn_blocking(move || {
         load()
             .into_iter()
@@ -289,7 +346,7 @@ pub async fn list_ai_tools(app: tauri::AppHandle) -> Vec<ToolInfo> {
                 ToolInfo {
                     found: path.is_some(),
                     path: path.map(|p| p.to_string_lossy().into_owned()),
-                    actions: t.actions.iter().map(|a| ActionInfo { id: a.id.clone(), label: a.label.clone() }).collect(),
+                    actions: t.actions.iter().map(|a| ActionInfo { id: a.id.clone(), label: localize_builtin(&a.label, l) }).collect(),
                     id: t.id,
                     name: t.name,
                     kind: t.kind,
@@ -321,7 +378,10 @@ pub fn launch_ide_tool(
         .creation_flags(0x0800_0000 | 0x0000_0008) // CREATE_NO_WINDOW | DETACHED_PROCESS
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("{} を起動できません: {e}", tool.name))
+        .map_err(|e| {
+            let name = &tool.name;
+            tr!("{name} を起動できません: {e}", "Cannot start {name}: {e}", "无法启动 {name}：{e}")
+        })
 }
 
 #[tauri::command]
@@ -345,5 +405,26 @@ mod tests {
         let v = Vars::new(Path::new(r"C:\Notes"), Some("a/b.md"), None);
         assert_eq!(v.expand("${noteRelativePath} x ${selectionFile}"), "a/b.md x ");
         assert_eq!(ps_quote("it's"), "'it''s'");
+    }
+
+    #[test]
+    fn builtin_texts_localized() {
+        let f: ToolsFile = serde_json::from_str(DEFAULT_TOOLS).unwrap();
+        // 既定の文言にはすべて訳がある
+        for a in f.tools.iter().flat_map(|t| &t.actions) {
+            assert_ne!(localize_builtin(&a.label, Locale::En), a.label);
+            for arg in a.args.iter().filter(|x| !x.is_ascii()) {
+                assert_ne!(localize_builtin(arg, Locale::En), *arg);
+                assert_ne!(localize_builtin(arg, Locale::Zh), *arg);
+            }
+        }
+        assert_eq!(localize_builtin("このファイルを要約する", Locale::Ja), "このファイルを要約する");
+        assert_eq!(localize_builtin("このファイルを要約する", Locale::Zh), "总结此文件");
+        assert_eq!(
+            localize_builtin("${noteRelativePath} を読んで、要点をまとめてください", Locale::En),
+            "Read ${noteRelativePath} and summarize the key points"
+        );
+        // ユーザーが書き換えた文言はそのまま
+        assert_eq!(localize_builtin("自分の操作", Locale::En), "自分の操作");
     }
 }
