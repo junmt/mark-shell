@@ -28,6 +28,7 @@ import {
   type WslInfo,
 } from './api';
 import { defaultConfig, mergeConfig, type Config } from './config';
+import { resolveTheme } from './themes';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
 
@@ -131,7 +132,9 @@ class Store {
   // ---- 設定 ----
   config = $state<Config>(structuredClone(defaultConfig));
   systemDark = $state(false);
-  dark = $derived(this.config.theme === 'dark' || (this.config.theme === 'system' && this.systemDark));
+  /** 配色（プリセットかカスタム）から決めた実際の色 */
+  colors = $derived(resolveTheme(this.config.theme, this.config.customColors, this.systemDark));
+  dark = $derived(this.colors.dark);
 
   // ---- 検索 ----
   searchOptions = $state<SearchOptions>({ query: '', caseSensitive: false, wholeWord: false, regex: false, folder: '' });

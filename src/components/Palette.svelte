@@ -1,9 +1,20 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { store } from '../lib/store.svelte';
+  import { api } from '../lib/api';
   import { basename, dirname } from '../lib/paths';
 
-  type Item = { key: string; label: string; detail?: string; shortcut?: string; run: () => void };
+  type Item = {
+    key: string;
+    label: string;
+    detail?: string;
+    shortcut?: string;
+    run: () => void;
+    /** 右クリックメニューでの run の名前 */
+    primaryLabel?: string;
+    /** 別の開き方（Shift+Enter・右クリック） */
+    alt?: { label: string; run: () => void };
+  };
 
   let query = $state('');
   let index = $state(0);
@@ -60,7 +71,14 @@
         .map((x) => ({ ...x, s: Math.max(score(x.name, q) * 2, score(x.r, q)) }))
         .filter((x) => x.s > 0)
         .sort((a, b) => (q ? b.s - a.s : 0))
-        .map(({ r, name }) => ({ key: r, label: name, detail: r, run: () => void store.openRoot(r) }));
+        .map(({ r, name }) => ({
+          key: r,
+          label: name,
+          detail: r,
+          run: () => void store.openRoot(r),
+          primaryLabel: 'このウィンドウで開く',
+          alt: { label: '新しいウィンドウで開く', run: () => void api.openNewWindow(r) },
+        }));
     }
     if (store.palette === 'commands') {
       return store
@@ -77,19 +95,28 @@
     store.palette = null;
   }
 
-  function choose(item: Item | undefined) {
+  function choose(item: Item | undefined, alt = false) {
     if (!item) return;
     close();
-    item.run();
+    (alt && item.alt ? item.alt.run : item.run)();
   }
 
   function keydown(e: KeyboardEvent) {
     if (e.key === 'Escape') close();
     else if (e.key === 'ArrowDown') index = Math.min(items.length - 1, index + 1);
     else if (e.key === 'ArrowUp') index = Math.max(0, index - 1);
-    else if (e.key === 'Enter') choose(items[index]);
+    else if (e.key === 'Enter') choose(items[index], e.shiftKey);
     else return;
     e.preventDefault();
+  }
+
+  // 別の開き方（新しいウィンドウで開くなど）がある項目は、右クリックで選べる
+  function itemMenu(e: MouseEvent, item: Item) {
+    if (!item.alt) return;
+    store.openMenu(e, [
+      { label: item.primaryLabel ?? '開く', shortcut: 'Enter', action: () => choose(item) },
+      { label: item.alt.label, shortcut: 'Shift+Enter', action: () => choose(item, true) },
+    ]);
   }
 
   $effect(() => {
@@ -115,7 +142,13 @@
     />
     <div class="list">
       {#each items as item, i (item.key)}
-        <button class="item" class:on={i === index} onmouseenter={() => (index = i)} onclick={() => choose(item)}>
+        <button
+          class="item"
+          class:on={i === index}
+          onmouseenter={() => (index = i)}
+          onclick={(e) => choose(item, e.shiftKey)}
+          oncontextmenu={(e) => itemMenu(e, item)}
+        >
           <span class="label">{item.label}</span>
           {#if item.detail}<span class="detail">{item.detail}</span>{/if}
           {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
@@ -124,6 +157,9 @@
         <div class="none">見つかりません</div>
       {/each}
     </div>
+    {#if store.palette === 'folders' && items.length > 0}
+      <div class="hint">Enter: このウィンドウで開く　Shift+Enter: 新しいウィンドウで開く（右クリックでも選べます）</div>
+    {/if}
   </div>
 {/if}
 
@@ -201,5 +237,12 @@
   .none {
     padding: 10px 14px;
     color: var(--fg-muted);
+  }
+
+  .hint {
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--fg-muted);
+    border-top: 1px solid var(--border);
   }
 </style>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { store } from './lib/store.svelte';
+  import { DEFAULT_FONTS, fontStack } from './lib/themes';
   import Toolbar from './components/Toolbar.svelte';
   import Welcome from './components/Welcome.svelte';
   import LeftPane from './components/LeftPane.svelte';
@@ -37,8 +38,13 @@
     return () => window.removeEventListener('wheel', onWheel, { capture: true });
   });
 
+  // 配色とフォントを CSS 変数にする（app.css の値は、ここが動く前の既定）
   $effect(() => {
-    document.documentElement.dataset.theme = store.dark ? 'dark' : 'light';
+    const root = document.documentElement;
+    root.dataset.theme = store.dark ? 'dark' : 'light';
+    for (const [name, value] of Object.entries(store.colors.vars)) root.style.setProperty(`--${name}`, value);
+    root.style.setProperty('--ui-font', fontStack(store.config.uiFontFamily, DEFAULT_FONTS.ui));
+    root.style.setProperty('--preview-font', fontStack(store.config.previewFontFamily, DEFAULT_FONTS.preview));
   });
 
   // 開いているファイルと選択範囲を Claude Code に伝える（store.cursor は選択が変わるたびに置き換わる）
@@ -49,11 +55,11 @@
     store.scheduleAiContext();
   });
 
-  // タイトルバーなどウィンドウ枠もアプリのテーマに合わせる（system なら Windows の設定に従う）
+  // タイトルバーなどウィンドウ枠も配色の明暗に合わせる（system なら Windows の設定に従う）
   $effect(() => {
-    const theme = store.config.theme;
+    const theme = store.config.theme === 'system' ? null : store.dark ? 'dark' : 'light';
     void getCurrentWindow()
-      .setTheme(theme === 'system' ? null : theme)
+      .setTheme(theme)
       .catch(() => {});
   });
 

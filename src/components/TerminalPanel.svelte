@@ -120,6 +120,8 @@
     flex: 1;
     min-height: 0;
     position: relative;
+    /* ターミナルの周りの余白もターミナルの背景色にする */
+    background: var(--terminal-bg, var(--bg-pane));
   }
 
   .view {

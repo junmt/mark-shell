@@ -7,6 +7,15 @@
     await api.removeRecent(path);
     store.recent = await api.getRecent();
   }
+
+  function recentMenu(e: MouseEvent, path: string) {
+    store.openMenu(e, [
+      { label: 'このウィンドウで開く', action: () => void store.openRoot(path) },
+      { label: '新しいウィンドウで開く', action: () => void api.openNewWindow(path) },
+      { label: '', separator: true },
+      { label: '一覧から消す', action: () => void api.removeRecent(path).then(async () => (store.recent = await api.getRecent())) },
+    ]);
+  }
 </script>
 
 <div class="welcome">
@@ -21,7 +30,7 @@
       <ul>
         {#each store.recent as r (r)}
           <li>
-            <button class="recent" onclick={() => void store.openRoot(r)} title={r}>
+            <button class="recent" onclick={() => void store.openRoot(r)} oncontextmenu={(e) => recentMenu(e, r)} title={r}>
               <span class="name">{r.split(/[\\/]/).filter(Boolean).pop()}</span>
               <span class="path">{r}</span>
             </button>

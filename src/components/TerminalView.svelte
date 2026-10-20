@@ -81,6 +81,11 @@
     if (text) term.paste(text);
   }
 
+  /** 16 色は明暗で選び、背景・文字・カーソル・選択の色は配色に合わせる */
+  function terminalTheme(): ITheme {
+    return { ...(store.dark ? dark : light), ...store.colors.terminal };
+  }
+
   onMount(() => {
     term = new Terminal({
       fontFamily: store.config.terminal.fontFamily || TERMINAL_FONT,
@@ -88,7 +93,7 @@
       scrollback: 10000,
       allowProposedApi: true,
       cursorBlink: true,
-      theme: store.dark ? dark : light,
+      theme: terminalTheme(),
     });
     fit = new FitAddon();
     term.loadAddon(fit);
@@ -154,7 +159,8 @@
   });
 
   $effect(() => {
-    if (term) term.options.theme = store.dark ? dark : light;
+    const theme = terminalTheme();
+    if (term) term.options.theme = theme;
   });
 
   $effect(() => {
