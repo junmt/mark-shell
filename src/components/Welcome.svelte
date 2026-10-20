@@ -2,6 +2,9 @@
   import { store } from '../lib/store.svelte';
   import { api } from '../lib/api';
 
+  /** ようこそ画面に並べる数（履歴は 100 件まで持ち、残りは Ctrl+R で探す） */
+  const WELCOME_RECENT = 20;
+
   async function forget(e: MouseEvent, path: string) {
     e.stopPropagation();
     await api.removeRecent(path);
@@ -28,7 +31,7 @@
     {#if store.recent.length}
       <h2>最近開いたフォルダ</h2>
       <ul>
-        {#each store.recent as r (r)}
+        {#each store.recent.slice(0, WELCOME_RECENT) as r (r)}
           <li>
             <button class="recent" onclick={() => void store.openRoot(r)} oncontextmenu={(e) => recentMenu(e, r)} title={r}>
               <span class="name">{r.split(/[\\/]/).filter(Boolean).pop()}</span>
@@ -38,6 +41,12 @@
           </li>
         {/each}
       </ul>
+      {#if store.recent.length > WELCOME_RECENT}
+        <p class="hint">
+          ほかに {store.recent.length - WELCOME_RECENT} 件あります。
+          <button class="link" onclick={() => void store.chooseRecentRoot()}>名前で探す (Ctrl+R)</button>
+        </p>
+      {/if}
     {/if}
   </div>
 </div>
@@ -74,6 +83,15 @@
   .hint {
     color: var(--fg-muted);
     font-size: 12px;
+  }
+
+  .link {
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--md-link);
+    cursor: pointer;
+    font-size: inherit;
   }
 
   ul {

@@ -12,7 +12,7 @@ use crate::paths::FilterConfig;
 use crate::state::AppState;
 use crate::textio::write_atomic;
 
-const MAX_RECENT: usize = 15;
+const MAX_RECENT: usize = 100;
 
 /// %APPDATA%\mark-shell
 pub fn config_dir() -> PathBuf {
