@@ -49,6 +49,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # アップデートの署名鍵（npx tauri signer generate で作ったもの。パスワードなし）。
+          # これで署名した更新ファイルと latest.json がリリースに添付され、アプリが自動アップデートに使う
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: ${{ github.ref_name }}
           releaseName: mark-shell ${{ github.ref_name }}

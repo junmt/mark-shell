@@ -6,6 +6,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { check as checkUpdate, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { getVersion } from '@tauri-apps/api/app';
 import { escapeHtml, renderMarkdown } from './markdown';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
@@ -25,6 +28,8 @@ import {
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
+
+const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
 
 export type Mode = 'edit' | 'preview' | 'split';
 export type LeftView = 'files' | 'search' | 'outline';
@@ -239,10 +244,67 @@ class Store {
     this.recent = await api.getRecent();
     const target = launch ?? this.recent[0];
     if (target) await this.openRoot(target);
+
+    // 起動の邪魔をしないよう少し待ってから確認する。開発中は確認しない
+    if (this.config.checkUpdates && !import.meta.env.DEV) setTimeout(() => void this.checkForUpdate(false), 5000);
   }
 
   async refreshAiTools() {
     this.aiTools = await api.listAiTools();
+  }
+
+  // ================= アップデート =================
+
+  private updateDeclined = false;
+
+  /** GitHub のリリースに新しいバージョンがあれば、ダウンロードして入れ替え、再起動する。manual は設定画面などから呼んだとき */
+  async checkForUpdate(manual: boolean) {
+    if (!manual && this.updateDeclined) return;
+    let update: Update | null;
+    try {
+      update = await checkUpdate();
+    } catch (e) {
+      if (manual) this.toast(`アップデートを確認できません: ${errorMessage(e)}`, 'error');
+      return;
+    }
+    if (!update) {
+      if (manual) this.toast(`最新のバージョン（${await getVersion()}）です`);
+      return;
+    }
+    if (!(await api.isInstalled())) {
+      // 単体実行版の exe は自分を置き換えられないので、ダウンロードしてもらう
+      const ok = await this.confirm(
+        'アップデート',
+        `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。インストールせずに使う版なので、自動では更新できません。リリースのページを開きますか？`,
+        'ページを開く',
+        'あとで',
+      );
+      if (ok) await openUrl(RELEASES_URL);
+      else this.updateDeclined = true;
+      return;
+    }
+    const running = this.terminals.some((t) => !t.exited);
+    const ok = await this.confirm(
+      'アップデート',
+      `新しいバージョン ${update.version} があります（いまは ${update.currentVersion}）。更新して再起動しますか？編集中のファイルは保存します。` +
+        (running ? 'ターミナル（AI ツールを含む）は終了します。' : ''),
+      '更新して再起動',
+      'あとで',
+    );
+    if (!ok) {
+      this.updateDeclined = true;
+      return;
+    }
+    await this.saveAll();
+    this.saveWorkspaceStateNow();
+    this.toast(`バージョン ${update.version} をダウンロードしています…`);
+    try {
+      // Windows ではインストーラーが動くとアプリは終了し、入れ替え後に起動し直す
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (e) {
+      this.toast(`アップデートできませんでした: ${errorMessage(e)}`, 'error');
+    }
   }
 
   // ================= ルートディレクトリ =================
@@ -1235,6 +1297,7 @@ class Store {
       { id: 'print', label: '印刷 / PDF に保存', run: () => void this.print() },
       { id: 'aiGuide', label: 'AI 向けの説明ファイル（CLAUDE.md / AGENTS.md）を作成', run: () => void this.createAiGuide() },
       { id: 'aiRefresh', label: 'AI ツールを探し直す', run: () => void this.refreshAiTools() },
+      { id: 'update', label: 'アップデートを確認', run: () => void this.checkForUpdate(true) },
       { id: 'settings', label: '設定', shortcut: 'Ctrl+,', run: () => (this.settingsOpen = true) },
     ];
     for (const s of this.shells) {

@@ -25,6 +25,8 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState::new())
         .register_uri_scheme_protocol("mdimg", protocol::handle)
         .invoke_handler(tauri::generate_handler![
@@ -56,6 +58,7 @@ pub fn run() {
             workspace::reveal_in_explorer,
             workspace::absolute_path,
             workspace::open_new_window,
+            workspace::is_installed,
             search::search_start,
             search::search_cancel,
             search::replace_in_files,

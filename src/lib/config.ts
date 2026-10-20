@@ -15,6 +15,8 @@ export type Config = {
   respectGitignore: boolean;
   followSymlinks: boolean;
   showEmptyDirs: boolean;
+  /** 起動時に GitHub のリリースを見て新しいバージョンを知らせる */
+  checkUpdates: boolean;
   treeSort: 'name' | 'mtime';
   externalImages: 'click' | 'always';
   imageFolder: string;
@@ -42,6 +44,7 @@ export const defaultConfig: Config = {
   respectGitignore: true,
   followSymlinks: false,
   showEmptyDirs: false,
+  checkUpdates: true,
   treeSort: 'name',
   externalImages: 'click',
   imageFolder: 'assets',

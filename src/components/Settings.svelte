@@ -145,6 +145,14 @@
           </button>
         </div>
       </section>
+
+      <section>
+        <h3>アップデート</h3>
+        <label class="check"><input type="checkbox" bind:checked={draft.checkUpdates} /> 起動時に新しいバージョンがあるか確認する</label>
+        <div class="row">
+          <button class="btn" onclick={() => void store.checkForUpdate(true)}>いま確認する</button>
+        </div>
+      </section>
     </div>
     <div class="buttons">
       <button class="btn" onclick={() => (store.settingsOpen = false)}>キャンセル</button>

@@ -472,6 +472,16 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Result<()
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// インストーラーで入れたものか（隣にアンインストーラーがある）。
+/// 単体実行版（*-portable.exe）は自動アップデートできないので、画面側でリリースのページに案内する
+#[tauri::command]
+pub fn is_installed() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("uninstall.exe").exists()))
+        .unwrap_or(false)
+}
+
 /// 別のフォルダを新しいウィンドウ（別プロセス）で開く
 #[tauri::command]
 pub fn open_new_window(path: Option<String>) -> Result<(), String> {

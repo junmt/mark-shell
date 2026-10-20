@@ -86,6 +86,7 @@ export const api = {
   revealInExplorer: (path: string) => invoke<void>('reveal_in_explorer', { path }),
   absolutePath: (path: string) => invoke<string>('absolute_path', { path }),
   openNewWindow: (path?: string) => invoke<void>('open_new_window', { path }),
+  isInstalled: () => invoke<boolean>('is_installed'),
 
   searchStart: (options: SearchOptions) => invoke<number>('search_start', { options }),
   searchCancel: () => invoke<void>('search_cancel'),
