@@ -164,7 +164,7 @@ pub fn search_start(app: AppHandle, state: State<'_, AppState>, options: SearchO
                     return WalkState::Quit;
                 }
                 let Ok(e) = res else { return WalkState::Continue };
-                if !e.file_type().map(|t| t.is_file()).unwrap_or(false) || !filter.is_markdown(e.path()) {
+                if !e.file_type().map(|t| t.is_file()).unwrap_or(false) || !filter.is_listed(e.path()) {
                     return WalkState::Continue;
                 }
                 let Some(rel) = to_rel(root, e.path()) else { return WalkState::Continue };

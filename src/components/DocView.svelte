@@ -16,6 +16,10 @@
     { id: 'preview', label: 'プレビュー' },
   ];
 
+  // Markdown 以外（ログなどのテキストファイル）はプレビューがないので編集だけ
+  const markdown = $derived(store.isMarkdown(doc.path));
+  const mode = $derived<Mode>(markdown ? doc.mode : 'edit');
+
   let splitWidth = $state(0.5);
   let body: HTMLDivElement | undefined = $state();
 
@@ -46,13 +50,15 @@
 
 <div class="doc">
   <div class="bar">
-    <div class="modes" role="radiogroup" aria-label="表示モード">
-      {#each modes as m (m.id)}
-        <button class:on={doc.mode === m.id} role="radio" aria-checked={doc.mode === m.id} onclick={() => setMode(m.id)} title="Ctrl+Shift+V で切り替え">
-          {m.label}
-        </button>
-      {/each}
-    </div>
+    {#if markdown}
+      <div class="modes" role="radiogroup" aria-label="表示モード">
+        {#each modes as m (m.id)}
+          <button class:on={doc.mode === m.id} role="radio" aria-checked={doc.mode === m.id} onclick={() => setMode(m.id)} title="Ctrl+Shift+V で切り替え">
+            {m.label}
+          </button>
+        {/each}
+      </div>
+    {/if}
     <span class="path" title={doc.path}>{doc.path}</span>
     {#if doc.readonly}<span class="tag">読み取り専用</span>{/if}
   </div>
@@ -72,17 +78,17 @@
   {/if}
 
   <div class="body" bind:this={body}>
-    {#if doc.mode !== 'preview'}
-      <div class="pane" style:flex={doc.mode === 'split' ? `0 0 ${splitWidth * 100}%` : '1'}>
-        <Editor {doc} onscrollline={(l) => doc.mode === 'split' && sync.editorToPreview?.(l)} bind:scrollToLine={sync.previewToEditor} />
+    {#if mode !== 'preview'}
+      <div class="pane" style:flex={mode === 'split' ? `0 0 ${splitWidth * 100}%` : '1'}>
+        <Editor {doc} onscrollline={(l) => mode === 'split' && sync.editorToPreview?.(l)} bind:scrollToLine={sync.previewToEditor} />
       </div>
     {/if}
-    {#if doc.mode === 'split'}
+    {#if mode === 'split'}
       <div class="split" role="separator" aria-orientation="vertical" onpointerdown={dragSplit}></div>
     {/if}
-    {#if doc.mode !== 'edit'}
+    {#if mode !== 'edit'}
       <div class="pane preview">
-        <Preview {doc} onscrollline={(l) => doc.mode === 'split' && sync.previewToEditor?.(l)} bind:scrollToLine={sync.editorToPreview} />
+        <Preview {doc} onscrollline={(l) => mode === 'split' && sync.previewToEditor?.(l)} bind:scrollToLine={sync.editorToPreview} />
       </div>
     {/if}
   </div>

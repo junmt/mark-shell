@@ -19,7 +19,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { yamlFrontmatter } from '@codemirror/lang-yaml';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, indentUnit } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, indentUnit, LanguageDescription } from '@codemirror/language';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import {
   autocompletion,
@@ -314,31 +314,24 @@ function looksLikeRichHtml(html: string): boolean {
   return /<(a\s|h[1-6]|ul|ol|li|table|strong|b>|em>|i>|img\s|blockquote)/i.test(html);
 }
 
-export function createExtensions(hooks: EditorHooks, opts: { lineNumbers: boolean; wrap: boolean; readOnly: boolean; fontSize: number; fontFamily: string }): Extension[] {
+/** Markdown 以外のファイルの色付け。拡張子から言語を探し、読み込めたら差し替える（ログなど該当しないものは色なし） */
+export const languageComp = new Compartment();
+
+export function loadLanguageFor(view: EditorView, path: string) {
+  const desc = LanguageDescription.matchFilename(languages, basename(path));
+  if (!desc) return;
+  void desc.load().then((support) => {
+    if (!view.dom.isConnected) return;
+    view.dispatch({ effects: languageComp.reconfigure(support) });
+  });
+}
+
+/** Markdown 専用の機能（言語モード・リンク補完・書式のショートカット・HTML や画像の貼り付け） */
+function markdownExtensions(hooks: EditorHooks): Extension[] {
   return [
-    lineNumbersComp.of(opts.lineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
-    wrapComp.of(opts.wrap ? EditorView.lineWrapping : []),
-    readOnlyComp.of(EditorState.readOnly.of(opts.readOnly)),
-    fontComp.of(fontTheme(opts.fontSize, opts.fontFamily)),
-    highlightSpecialChars(),
-    history(),
-    drawSelection(),
-    dropCursor(),
-    EditorState.allowMultipleSelections.of(true),
-    indentOnInput(),
-    indentUnit.of('  '),
-    bracketMatching(),
-    closeBrackets(),
-    rectangularSelection(),
-    crosshairCursor(),
-    highlightActiveLine(),
-    highlightSelectionMatches(),
-    search({ top: true }),
     autocompletion({ override: [linkCompletion(hooks)], activateOnTyping: true, icons: false }),
     // 先頭の --- で囲まれたフロントマターは YAML として色付けする
     yamlFrontmatter({ content: markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }) }),
-    syntaxHighlighting(highlightStyle),
-    baseTheme,
     placeholder('ここに Markdown で書きます'),
     Prec.high(
       keymap.of([
@@ -357,29 +350,7 @@ export function createExtensions(hooks: EditorHooks, opts: { lineNumbers: boolea
         },
       ]),
     ),
-    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
-    EditorView.updateListener.of((u) => {
-      if (u.docChanged) {
-        const external = u.transactions.every((tr) => !tr.docChanged || tr.isUserEvent('external'));
-        hooks.onChange(u.state.doc.toString(), external, u.view);
-      }
-      if (u.selectionSet || u.docChanged) {
-        const head = u.state.selection.main.head;
-        const line = u.state.doc.lineAt(head);
-        hooks.onCursor(line.number, head - line.from + 1);
-      }
-      if (u.focusChanged && !u.view.hasFocus) hooks.onBlur(u.view);
-    }),
     EditorView.domEventHandlers({
-      scroll(_e, view) {
-        const top = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
-        hooks.onScroll(view.state.doc.lineAt(top.from).number);
-      },
-      contextmenu(e) {
-        e.preventDefault();
-        hooks.onContextMenu(e);
-        return true;
-      },
       paste(e, view) {
         const data = e.clipboardData;
         if (!data) return false;
@@ -402,6 +373,59 @@ export function createExtensions(hooks: EditorHooks, opts: { lineNumbers: boolea
           return true;
         }
         return false;
+      },
+    }),
+  ];
+}
+
+export function createExtensions(
+  hooks: EditorHooks,
+  opts: { markdown: boolean; lineNumbers: boolean; wrap: boolean; readOnly: boolean; fontSize: number; fontFamily: string },
+): Extension[] {
+  return [
+    lineNumbersComp.of(opts.lineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+    wrapComp.of(opts.wrap ? EditorView.lineWrapping : []),
+    readOnlyComp.of(EditorState.readOnly.of(opts.readOnly)),
+    fontComp.of(fontTheme(opts.fontSize, opts.fontFamily)),
+    highlightSpecialChars(),
+    history(),
+    drawSelection(),
+    dropCursor(),
+    EditorState.allowMultipleSelections.of(true),
+    indentOnInput(),
+    indentUnit.of('  '),
+    bracketMatching(),
+    closeBrackets(),
+    rectangularSelection(),
+    crosshairCursor(),
+    highlightActiveLine(),
+    highlightSelectionMatches(),
+    search({ top: true }),
+    opts.markdown ? markdownExtensions(hooks) : languageComp.of([]),
+    syntaxHighlighting(highlightStyle),
+    baseTheme,
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+    EditorView.updateListener.of((u) => {
+      if (u.docChanged) {
+        const external = u.transactions.every((tr) => !tr.docChanged || tr.isUserEvent('external'));
+        hooks.onChange(u.state.doc.toString(), external, u.view);
+      }
+      if (u.selectionSet || u.docChanged) {
+        const head = u.state.selection.main.head;
+        const line = u.state.doc.lineAt(head);
+        hooks.onCursor(line.number, head - line.from + 1);
+      }
+      if (u.focusChanged && !u.view.hasFocus) hooks.onBlur(u.view);
+    }),
+    EditorView.domEventHandlers({
+      scroll(_e, view) {
+        const top = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
+        hooks.onScroll(view.state.doc.lineAt(top.from).number);
+      },
+      contextmenu(e) {
+        e.preventDefault();
+        hooks.onContextMenu(e);
+        return true;
       },
     }),
   ];

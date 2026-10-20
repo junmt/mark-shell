@@ -11,6 +11,14 @@ pub struct Decoded {
     pub eol: &'static str,
 }
 
+/// 先頭 8KB に NUL があればバイナリとみなす（UTF-16 は BOM があるものだけテキストとして扱う）
+pub fn looks_binary(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return false;
+    }
+    bytes[..bytes.len().min(8192)].contains(&0)
+}
+
 pub fn decode(bytes: &[u8]) -> Decoded {
     let (text, encoding) = if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         (String::from_utf8_lossy(rest).into_owned(), "utf-8-bom".to_string())
@@ -99,6 +107,13 @@ mod tests {
         assert_eq!(d.encoding, "utf-8-bom");
         assert_eq!(d.eol, "crlf");
         assert_eq!(encode(&d.text, &d.encoding, d.eol).unwrap(), b"\xEF\xBB\xBFa\r\nb");
+    }
+
+    #[test]
+    fn binary_detection() {
+        assert!(!looks_binary("ログ\n".as_bytes()));
+        assert!(looks_binary(b"\x89PNG\r\n\x1a\n\0\0"));
+        assert!(!looks_binary(b"\xFF\xFEa\0b\0"));
     }
 
     #[test]

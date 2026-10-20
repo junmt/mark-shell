@@ -1,7 +1,17 @@
 <script module lang="ts">
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
-  import { createExtensions, fontComp, fontTheme, htmlToMarkdown, lineNumbersComp, readOnlyComp, wrapComp, type EditorHooks } from '../lib/editor';
+  import {
+    createExtensions,
+    fontComp,
+    fontTheme,
+    htmlToMarkdown,
+    lineNumbersComp,
+    loadLanguageFor,
+    readOnlyComp,
+    wrapComp,
+    type EditorHooks,
+  } from '../lib/editor';
   import { lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
   import { store, type Doc } from '../lib/store.svelte';
   import { headings, slugify } from '../lib/markdown';
@@ -66,6 +76,7 @@
       doc.cm = EditorState.create({
         doc: doc.text,
         extensions: createExtensions(hooks, {
+          markdown: store.isMarkdown(doc.path),
           lineNumbers: store.config.lineNumbers,
           wrap: store.config.lineWrapping,
           readOnly: doc.readonly,
@@ -98,6 +109,7 @@
   onMount(() => {
     view = new EditorView({ parent: host, state: stateFor(doc) });
     docOf.set(view, doc);
+    if (!store.isMarkdown(doc.path)) loadLanguageFor(view, doc.path);
     store.view = view;
     bridge.onScrollLine = (line) => {
       if (Date.now() - programmatic > 150) onscrollline(line);

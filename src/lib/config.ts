@@ -9,6 +9,8 @@ export type Config = {
   lineWrapping: boolean;
   autosaveDelay: number;
   markdownExtensions: string[];
+  /** Markdown 以外に一覧に出すテキストファイルの拡張子（プレビューなしで編集できる） */
+  textExtensions: string[];
   excludePatterns: string[];
   respectGitignore: boolean;
   followSymlinks: boolean;
@@ -34,6 +36,8 @@ export const defaultConfig: Config = {
   lineWrapping: true,
   autosaveDelay: 1000,
   markdownExtensions: ['md', 'markdown', 'mdx'],
+  // Rust 側の paths.rs と同じ
+  textExtensions: ['txt', 'log', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'xml'],
   excludePatterns: [],
   respectGitignore: true,
   followSymlinks: false,

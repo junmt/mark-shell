@@ -6,7 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { renderMarkdown } from './markdown';
+import { escapeHtml, renderMarkdown } from './markdown';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
@@ -175,7 +175,13 @@ class Store {
     return this.terminals.some((t) => t.ai && !t.exited);
   }
 
-  /** Markdown ファイルの一覧（補完用） */
+  /** Markdown として扱うファイルか。それ以外（ログなどのテキストファイル）はプレビューなしで編集だけできる */
+  isMarkdown(path: string): boolean {
+    const ext = extname(path).replace(/^\./, '').toLowerCase();
+    return this.config.markdownExtensions.some((x) => x.toLowerCase() === ext);
+  }
+
+  /** 開けるファイルの一覧（リンク補完用） */
   markdownFiles(): string[] {
     const out: string[] = [];
     for (const e of this.entries.values()) if (!e.dir) out.push(e.path);
@@ -549,7 +555,7 @@ class Store {
 
   cycleMode() {
     const doc = this.activeDoc;
-    if (!doc) return;
+    if (!doc || !this.isMarkdown(doc.path)) return;
     doc.mode = doc.mode === 'edit' ? 'split' : doc.mode === 'split' ? 'preview' : 'edit';
     this.saveWorkspaceState();
   }
@@ -809,7 +815,8 @@ class Store {
   private async onDrop(paths: string[]) {
     for (const p of paths) {
       const rel = this.root ? absToRel(this.root, p) : null;
-      if (isImage(p) && this.activeDoc) {
+      // 画像のリンクを入れるのは Markdown を開いているときだけ
+      if (isImage(p) && this.activeDoc && this.isMarkdown(this.activeDoc.path)) {
         try {
           const r = await api.copyAsset(this.activeDoc.path, p, this.config.imageFolder);
           this.insertImageLink(r);
@@ -1134,7 +1141,7 @@ class Store {
     } catch (e) {
       this.toast(errorMessage(e), 'error');
     }
-    const scanKeys: (keyof Config)[] = ['markdownExtensions', 'excludePatterns', 'respectGitignore', 'followSymlinks'];
+    const scanKeys: (keyof Config)[] = ['markdownExtensions', 'textExtensions','excludePatterns', 'respectGitignore', 'followSymlinks'];
     if (scanKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(this.config[k])) && this.root) {
       await this.openRoot(this.root);
     }
@@ -1195,7 +1202,9 @@ class Store {
   async print() {
     const doc = this.activeDoc;
     if (!doc) return;
-    this.printHtml = renderMarkdown(doc.text, { root: this.root ?? '', notePath: doc.path, externalImages: 'always' });
+    this.printHtml = this.isMarkdown(doc.path)
+      ? renderMarkdown(doc.text, { root: this.root ?? '', notePath: doc.path, externalImages: 'always' })
+      : `<pre>${escapeHtml(doc.text)}</pre>`;
     // 描画を待ってから印刷する
     setTimeout(() => {
       window.print();

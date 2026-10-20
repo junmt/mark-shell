@@ -95,7 +95,7 @@ where
                     }
                     let Some(ft) = e.file_type() else { return WalkState::Continue };
                     let is_dir = ft.is_dir();
-                    if !is_dir && !filter.is_markdown(e.path()) {
+                    if !is_dir && !filter.is_listed(e.path()) {
                         return WalkState::Continue;
                     }
                     if !is_dir && files.fetch_add(1, Ordering::Relaxed) as usize >= MAX_FILES {
@@ -208,12 +208,25 @@ pub struct ReadResult {
     mtime: u64,
 }
 
+/// エディタで開けるファイルの大きさの上限。大きなログでも画面が固まらない程度にする
+const MAX_OPEN_BYTES: u64 = 50 * 1024 * 1024;
+
 #[tauri::command]
 pub fn read_file(state: State<'_, AppState>, path: String) -> Result<ReadResult, String> {
     let root = state.root()?;
     let p = resolve(&root, &path)?;
     let meta = fs::metadata(&p).map_err(|e| format!("{path} を開けません: {e}"))?;
+    if meta.len() > MAX_OPEN_BYTES {
+        return Err(format!(
+            "{path} は大きすぎるため開けません（{} MB。開けるのは {} MB まで）",
+            meta.len() / 1024 / 1024,
+            MAX_OPEN_BYTES / 1024 / 1024
+        ));
+    }
     let bytes = fs::read(&p).map_err(|e| format!("{path} を読めません: {e}"))?;
+    if textio::looks_binary(&bytes) {
+        return Err(format!("{path} はテキストファイルではないため開けません"));
+    }
     let d = textio::decode(&bytes);
     Ok(ReadResult {
         content: d.text,

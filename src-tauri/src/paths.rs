@@ -12,9 +12,16 @@ const DEFAULT_EXCLUDED: &[&str] = &[
     "System Volume Information",
 ];
 
+/// 既定で一覧に出すテキストファイルの拡張子（画面側の config.ts と同じ）
+pub const DEFAULT_TEXT_EXTENSIONS: &[&str] = &[
+    "txt", "log", "csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "ini", "cfg", "conf", "xml",
+];
+
 /// 探索の対象と除外の設定
 pub struct FilterConfig {
     pub extensions: Vec<String>,
+    /// Markdown 以外に一覧に出すテキストファイルの拡張子
+    pub text_extensions: Vec<String>,
     pub excluded_names: Vec<String>,
     pub exclude_globs: GlobSet,
     pub respect_gitignore: bool,
@@ -35,6 +42,18 @@ impl FilterConfig {
             })
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| vec!["md".into(), "markdown".into(), "mdx".into()]);
+        // 設定がなければ既定の一覧。空の一覧は「Markdown だけ」の意味
+        let text_extensions = config
+            .get("textExtensions")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.trim_start_matches('.').to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| DEFAULT_TEXT_EXTENSIONS.iter().map(|s| s.to_string()).collect());
 
         let mut builder = GlobSetBuilder::new();
         if let Some(patterns) = config.get("excludePatterns").and_then(Value::as_array) {
@@ -52,6 +71,7 @@ impl FilterConfig {
 
         Self {
             extensions,
+            text_extensions,
             excluded_names: DEFAULT_EXCLUDED.iter().map(|s| s.to_lowercase()).collect(),
             exclude_globs,
             respect_gitignore: config
@@ -70,6 +90,19 @@ impl FilterConfig {
             .and_then(|e| e.to_str())
             .map(|e| self.extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
             .unwrap_or(false)
+    }
+
+    /// 一覧に出して開けるファイルか（Markdown か、設定したテキストファイル）。
+    /// app.log.1 や app.log.2026-10-20 のようにローテートされたログも含める
+    pub fn is_listed(&self, path: &Path) -> bool {
+        if self.is_markdown(path) {
+            return true;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+        let lower = name.to_lowercase();
+        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_lowercase);
+        self.text_extensions.iter().any(|x| ext.as_deref() == Some(x.as_str()))
+            || (self.text_extensions.iter().any(|x| x == "log") && lower.contains(".log.") && !is_archive(&lower))
     }
 
     /// フォルダ名・ファイル名、またはルートからの相対パスが除外対象かどうか
@@ -96,6 +129,11 @@ impl FilterConfig {
         }
         false
     }
+}
+
+/// 圧縮されたログ（app.log.1.gz など）はテキストとして開けないので一覧に出さない
+fn is_archive(lower_name: &str) -> bool {
+    [".gz", ".zip", ".bz2", ".xz", ".zst", ".7z"].iter().any(|s| lower_name.ends_with(s))
 }
 
 /// ルートからの相対パス（区切りは `/`）に変換する
@@ -200,6 +238,21 @@ mod tests {
         assert_eq!(normalize_rel("a\\b").as_deref(), Some("a/b"));
         assert_eq!(normalize_rel("../x"), None);
         assert_eq!(normalize_rel("C:/x"), None);
+    }
+
+    #[test]
+    fn listed_files() {
+        let f = FilterConfig::from_config(&serde_json::json!({}));
+        for name in ["a.md", "b.TXT", "app.log", "app.log.1", "app.log.2026-10-20", "x.json"] {
+            assert!(f.is_listed(Path::new(name)), "{name}");
+        }
+        for name in ["a.png", "app.log.1.gz", "README", "a.exe"] {
+            assert!(!f.is_listed(Path::new(name)), "{name}");
+        }
+        // 空の一覧なら Markdown だけ
+        let f = FilterConfig::from_config(&serde_json::json!({ "textExtensions": [] }));
+        assert!(f.is_listed(Path::new("a.md")));
+        assert!(!f.is_listed(Path::new("a.txt")) && !f.is_listed(Path::new("app.log.1")));
     }
 
     #[test]

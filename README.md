@@ -35,7 +35,7 @@ cd src-tauri; cargo test   # Rust 側（パス・文字コード・リンク書�
 npm run tauri build        # src-tauri/target/release/bundle/ に MSI と NSIS のインストーラーができる
 ```
 
-GitHub に `v1.2.3` の形のタグを push すると、GitHub Actions（`.github/workflows/release.yml`）がテストしてからインストーラーを作り、Releases に公開します。アプリのバージョンはタグから取ります。
+GitHub に `v1.2.3` の形のタグを push すると、GitHub Actions（`.github/workflows/release.yml`）がテストしてからインストーラー（`-setup.exe` と `.msi`）と単体実行版の exe（`-portable.exe`）を作り、Releases に公開します。アプリのバージョンはタグから取ります。
 
 ```powershell
 git tag v0.2.0

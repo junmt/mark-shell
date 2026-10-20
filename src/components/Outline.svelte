@@ -3,13 +3,16 @@
   import { headings } from '../lib/markdown';
 
   const doc = $derived(store.activeDoc);
-  const items = $derived(doc ? headings(doc.text) : []);
+  const markdown = $derived(!!doc && store.isMarkdown(doc.path));
+  const items = $derived(doc && markdown ? headings(doc.text) : []);
   const minLevel = $derived(Math.min(...items.map((i) => i.level), 6));
 </script>
 
 <div class="outline">
   {#if !doc}
     <div class="empty">ファイルを開くと見出しの一覧が出ます。</div>
+  {:else if !markdown}
+    <div class="empty">Markdown ではないファイルには見出しの一覧がありません。</div>
   {:else if items.length === 0}
     <div class="empty">見出しがありません。</div>
   {:else}

@@ -52,6 +52,21 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: mark-shell ${{ github.ref_name }}
-          releaseBody: インストーラーは下の Assets から選んでください（通常は *-setup.exe）。
+          releaseBody: |
+            下の Assets から選んでください。
+            - `*-setup.exe`: インストーラー（通常はこちら）
+            - `*.msi`: 管理者が配布するときのインストーラー
+            - `*-portable.exe`: インストールせずにそのまま起動できる単体の exe（WebView2 ランタイムが必要。Windows 11 は標準で入っている）
           releaseDraft: false
           prerelease: false
+
+      # インストールせずに使える単体の exe も置く（画面の部品は exe に埋め込まれている。WebView2 ランタイムは必要）
+      - name: 単体実行版の exe を添付する
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $portable = "mark-shell_${version}_x64-portable.exe"
+          Copy-Item src-tauri/target/release/mark-shell.exe $portable
+          gh release upload '${{ github.ref_name }}' $portable --clobber

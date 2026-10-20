@@ -121,7 +121,7 @@ fn present(root: &Path, filter: &Arc<FilterConfig>, gi: &Option<Gitignore>, path
         scan(root, path, filter, || false, |batch| {
             out.extend(batch.into_iter().map(Change::Create));
         });
-    } else if filter.is_markdown(path) {
+    } else if filter.is_listed(path) {
         out.push(Change::Create(entry));
     }
 }
@@ -165,7 +165,7 @@ fn collect(root: &Path, filter: &Arc<FilterConfig>, gi: &Option<Gitignore>, ev: 
         },
         EventKind::Modify(_) => {
             for p in &ev.paths {
-                if !filter.is_markdown(p) {
+                if !filter.is_listed(p) {
                     continue;
                 }
                 if let Some((entry, false)) = entry_for(root, p) {
