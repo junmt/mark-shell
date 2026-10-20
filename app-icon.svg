@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#2f6fdd"/>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="none" stroke="#1d4fa8" stroke-width="16"/>
+  <!-- M と ↓（Markdown の記号） -->
+  <path d="M220 700V324h86l96 128 96-128h86v376h-96V472l-86 112-86-112v228z" fill="#fff"/>
+  <path d="M690 324h96v220h80L738 700 610 544h80z" fill="#fff"/>
+  <!-- シェルのプロンプト -->
+  <path d="M232 780l60 36-60 36" fill="none" stroke="#bcd3ff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M332 852h120" stroke="#bcd3ff" stroke-width="28" stroke-linecap="round"/>
+</svg>
