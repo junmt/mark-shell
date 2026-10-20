@@ -12,7 +12,7 @@
 | 数式 / 図 | KaTeX / Mermaid | すべて同梱し、オフラインで動かす |
 | サニタイズ | DOMPurify | プレビューの XSS 対策 |
 | ターミナル | xterm.js（UI）＋ portable-pty（Rust、ConPTY） | Windows ネイティブの疑似端末で PowerShell や CLI ツールが正しく動く |
-| ディレクトリ探索 | ignore（Rust、ripgrep のライブラリ） | 並列での再帰探索、`.gitignore` の解釈、除外パターンに対応 |
+| ディレクトリ探索 | ignore（Rust、ripgrep のライブラリ） | 並列での再帰探索 |
 | 全文検索 | grep-searcher / grep-regex（Rust、ripgrep のライブラリ） | インデックスなしで高速に走査できる |
 | ファイル監視 | notify（Rust） | ReadDirectoryChangesW を使う |
 | インストーラー | WiX（MSI）/ NSIS | Tauri の標準機能 |
@@ -56,6 +56,28 @@
 - 以後の追加・削除・名前変更は Watcher のイベントでツリーを差分更新する。
 - 監視イベントの取りこぼし（バッファあふれ）を検出したら、そのフォルダ以下を探索し直す。
 
+### 2.2 WSL のフォルダ
+
+`\\wsl.localhost\<ディストリビューション>\...`（または `\\wsl$\...`）のフォルダを開いたときは、VS Code の WSL 拡張と同じく WSL の中でエージェントを動かす。
+
+```text
+mark-shell.exe（Windows）                        WSL（Linux）
+ ├─ 1 つのファイルの読み書き ── \\wsl.localhost ──▶ ファイル
+ ├─ wsl.rs ── wsl.exe（標準入出力・JSON） ───────▶ ~/.mark-shell/agent-<hash>
+ │                                                  ├─ 探索・全文検索・置換
+ │                                                  ├─ リンクの書き換え
+ │                                                  ├─ 変更の監視（inotify）
+ │                                                  └─ ごみ箱（~/.local/share/Trash）
+ └─ ConPTY ── wsl.exe -d <distro> --cd <Linux のパス> ─▶ シェル / claude など
+```
+
+- 理由: Windows から `\\wsl.localhost` 経由ではフォルダ全体をたどる処理が遅く、変更の通知（ReadDirectoryChangesW）が届かない。Windows のごみ箱も使えない。
+- 処理の本体は `crates/core` にあり、Windows 版とエージェントで同じコードを使う。エージェント（`crates/agent`）は Windows 上で Linux 向け（`x86_64-unknown-linux-musl`、静的リンク、`rust-lld`）にビルドし、アプリに埋め込む（`src-tauri/build.rs`）。WSL 側に追加のインストールは要らない。
+- 初回に `wsl.exe` の標準入力でエージェントを `~/.mark-shell/agent-<中身のハッシュ>` に置く。版が変わると名前が変わるので置き直し、古いものは消す。
+- エージェントとは 1 行 1 つの JSON でやり取りする。探索・検索・監視の結果は、画面側が Windows のフォルダで受け取るイベント（`scan:batch`、`fs:change` など）と同じ名前・同じ形で送るので、画面側は区別しない。
+- エージェントはウィンドウ（プロセス）とディストリビューションごとに 1 つ。アプリが終わると標準入力が閉じ、エージェントも終わる。
+- ターミナルの既定のシェルはそのディストリビューションのシェルになり、開いているフォルダの Linux のパスで始まる。CLI の AI ツールは WSL の中でログインシェル（`sh -lc`）から起動するので、`~/.local/bin` などの PATH が通る。
+
 ## 3. データの置き場所
 
 ### 3.1 ルートディレクトリ
@@ -78,7 +100,7 @@
 
 | 場所 | 内容 |
 | --- | --- |
-| `%APPDATA%\mark-shell\config.json` | テーマ、フォント、ショートカット、除外パターン、ターミナルの設定 |
+| `%APPDATA%\mark-shell\config.json` | テーマ、フォント、ショートカット、ターミナルの設定 |
 | `%APPDATA%\mark-shell\ai-tools.json` | AI ツール定義（[terminal-ai.md](terminal-ai.md)） |
 | `%LOCALAPPDATA%\mark-shell\workspaces\<パスのハッシュ>.json` | ディレクトリごとの状態（開いていたタブ、フォルダの開閉、ペインの大きさ） |
 | `%LOCALAPPDATA%\mark-shell\recent.json` | 最近開いたディレクトリ |

@@ -12,7 +12,7 @@
 <div class="welcome">
   <div class="box">
     <h1>mark-shell</h1>
-    <p class="lead">フォルダを開くと、その中の Markdown ファイルを一覧して編集できます。</p>
+    <p class="lead">フォルダを開くと、その中のファイルを一覧して、Markdown やテキストファイルを編集できます。</p>
     <button class="btn primary" onclick={() => void store.chooseRoot()}>フォルダを開く (Ctrl+O)</button>
     <p class="hint">フォルダをこのウィンドウにドラッグ＆ドロップしても開けます。</p>
 

@@ -17,11 +17,6 @@
     return { start, items: rows.slice(start, end), total: rows.length };
   });
 
-  function displayName(node: TreeNode): string {
-    if (node.dir) return node.name;
-    return node.name.replace(/\.(md|markdown|mdx)$/i, '');
-  }
-
   function click(node: TreeNode, e: MouseEvent) {
     store.selected = node.path;
     if (node.dir) {
@@ -201,7 +196,7 @@
       >
         <span class="twisty">{node.dir ? (store.expanded.has(node.path) ? '▾' : '▸') : ''}</span>
         <span class="icon">{node.dir ? '📁' : '📄'}</span>
-        <span class="name">{displayName(node)}</span>
+        <span class="name">{node.name}</span>
         {#if store.aiChanged.has(node.path)}<span class="badge" title="AI セッション中に変更されました">AI</span>{/if}
         {#if store.docs.find((d) => d.path === node.path)?.dirty}<span class="dot">●</span>{/if}
       </div>

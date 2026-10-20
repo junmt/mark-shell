@@ -6,7 +6,7 @@
 
 - Windows 10 / 11
 - [Node.js](https://nodejs.org/) 20 以降
-- [Rust](https://www.rust-lang.org/)（`rustup` で stable）
+- [Rust](https://www.rust-lang.org/)（`rustup` で stable）と、WSL 用エージェントのビルドに使う Linux 向けのターゲット（`rustup target add x86_64-unknown-linux-musl`）
 - Visual Studio の「C++ によるデスクトップ開発」（MSVC と Windows SDK）
 - WebView2 ランタイム（Windows 11 は標準で入っています）
 
@@ -16,7 +16,7 @@
 
 ```powershell
 npm install
-npm run tauri dev          # 開発モードで起動（画面の変更は即時反映）
+npm run tauri dev          # 開発モードで起動（画面の変更は即時反映）。先に WSL 用エージェントもビルドする
 ```
 
 ビルドした実行ファイルは `mark-shell.exe C:\Notes` のようにフォルダを指定して起動できます。
@@ -26,7 +26,8 @@ npm run tauri dev          # 開発モードで起動（画面の変更は即時
 ```powershell
 npm test                   # 画面側（パス計算・ツリー・表の整形・Markdown 描画）
 npm run check              # 型チェック
-cd src-tauri; cargo test   # Rust 側（パス・文字コード・リンク書き換え・AI ツール定義）
+cd crates/core; cargo test # 共通部品（パス・文字コード・リンク書き換え）
+cd src-tauri; cargo test   # アプリ本体（AI ツール定義・文脈・WSL のパス）
 ```
 
 ## 配布用のビルド
@@ -50,10 +51,12 @@ git push origin v0.2.0
 | `src/lib/store.svelte.ts` | アプリ全体の状態（タブ、保存、外部変更の取り込み、ファイル操作、検索、ターミナル） |
 | `src/lib/markdown.ts` | Markdown → HTML（GFM、数式、Mermaid、`[[内部リンク]]`、サニタイズ） |
 | `src/lib/editor.ts` | CodeMirror 6 の設定と編集コマンド |
-| `src-tauri/src/workspace.rs` | フォルダの再帰探索とファイル操作 |
+| `crates/core/` | Windows 版と WSL 用エージェントで共有する処理（探索・検索・監視・リンクの書き換え・文字コード） |
+| `crates/agent/` | WSL の中で動くエージェント。Windows 上で Linux 向け（musl）にビルドしてアプリに埋め込む |
+| `src-tauri/src/workspace.rs` | フォルダを開く・ファイル操作 |
 | `src-tauri/src/watcher.rs` | ファイル変更の監視 |
 | `src-tauri/src/search.rs` | 全文検索（インデックスなし） |
-| `src-tauri/src/links.rs` | 名前変更・移動に合わせたリンクの書き換え |
+| `src-tauri/src/wsl.rs` | WSL 統合（エージェントの配置・起動・やり取り） |
 | `src-tauri/src/pty.rs` | ConPTY によるターミナル |
 | `src-tauri/src/ai_tools.rs` | AI ツールの検出と起動 |
 

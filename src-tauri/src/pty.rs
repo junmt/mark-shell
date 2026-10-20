@@ -1,6 +1,8 @@
 //! ConPTY によるターミナル。シェルや AI CLI を疑似端末で動かし、入出力を UI と中継する
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -11,9 +13,10 @@ use tauri::{AppHandle, Manager, State};
 use crate::ai_context;
 use crate::ai_tools;
 use crate::config::local_dir;
-use crate::paths::resolve;
+use crate::paths::{parent_rel, resolve};
 use crate::shells;
 use crate::state::AppState;
+use crate::wsl::{self, WslRoot};
 
 pub struct PtySession {
     writer: Box<dyn Write + Send>,
@@ -62,71 +65,127 @@ fn write_selection_file(text: &str) -> Result<std::path::PathBuf, String> {
     Ok(path)
 }
 
+/// WSL のフォルダで CLI の AI ツールを WSL の中で起動する。
+/// ログインシェルで起動して PATH などをそろえ、ツールが終わったらそのままシェルに戻る
+fn wsl_tool_command(w: &WslRoot, tool: &ai_tools::ToolDef, action: Option<&str>, note: Option<&str>, selection_file: Option<&Path>) -> Result<CommandBuilder, String> {
+    let exe = ai_tools::find_in_wsl(tool, w)
+        .ok_or_else(|| format!("{} が WSL（{}）に見つかりません。WSL の中にインストールされているか確認してください", tool.name, w.distro))?;
+    let mut map = HashMap::new();
+    map.insert("root", w.linux_root.clone());
+    if let Some(n) = note {
+        map.insert("note", w.linux_path(n));
+        map.insert("noteRelativePath", n.to_string());
+        map.insert("noteDir", w.linux_path(parent_rel(n)));
+    }
+    if let Some(s) = selection_file {
+        map.insert("selectionFile", w.to_linux(s)?);
+    }
+    let is_claude = tool.id == "claude-code";
+    if is_claude {
+        map.insert("claudeSettings", ai_context::claude_settings_file_wsl(w)?);
+    }
+    let vars = ai_tools::Vars { map };
+    let mut args = ai_tools::args_for(tool, action, &vars)?;
+    if is_claude && !args.iter().any(|a| a == "--settings") {
+        args.splice(0..0, ["--settings".to_string(), vars.map["claudeSettings"].clone()]);
+    }
+    let cwd = tool.launch.cwd.as_deref().map(|c| vars.expand(c)).filter(|c| c.starts_with('/')).unwrap_or_else(|| w.linux_root.clone());
+    let mut c = CommandBuilder::new(wsl::wsl_exe());
+    c.args(["-d", &w.distro, "--cd", &cwd, "--exec", "sh", "-lc", "\"$@\"; exec \"${SHELL:-sh}\" -l", "sh", &exe]);
+    c.args(&args);
+    Ok(c)
+}
+
 #[tauri::command]
 pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, on_event: Channel<PtyEvent>) -> Result<SpawnResult, String> {
     let root = state.root()?;
-    let cwd = match req.cwd.as_deref() {
-        Some(c) => resolve(&root, c)?,
-        None => root.clone(),
+    let wsl = state.wsl();
+    let (cwd, cwd_rel) = match req.cwd.as_deref() {
+        Some(c) => (resolve(&root, c)?, c.to_string()),
+        None => (root.clone(), String::new()),
     };
-    let cwd = if cwd.is_dir() { cwd } else { root.clone() };
+    let (cwd, cwd_rel) = if cwd.is_dir() { (cwd, cwd_rel) } else { (root.clone(), String::new()) };
     let note_abs = req.note.as_deref().and_then(|n| resolve(&root, n).ok());
     let selection_file = match req.selection.as_deref().filter(|s| !s.is_empty()) {
         Some(s) => Some(write_selection_file(s)?),
         None => None,
     };
 
-    let (mut cmd, title) = if let Some(tool_id) = req.tool_id.as_deref() {
-        let (tool, path) = ai_tools::find(tool_id)?;
-        let vars = ai_tools::Vars::new(&root, req.note.as_deref(), selection_file.as_deref());
-        let mut args = ai_tools::args_for(&tool, req.action_id.as_deref(), &vars)?;
-        // Claude Code には開いているファイルを伝えるフックを渡す。
-        // 以前の既定値のまま保存された ai-tools.json でも効くよう、定義に --settings がなければ足す
-        if tool.id == "claude-code" && !args.iter().any(|a| a == "--settings") {
-            if let Ok(p) = ai_context::claude_settings_file() {
-                args.splice(0..0, ["--settings".to_string(), p.to_string_lossy().into_owned()]);
+    // in_wsl: WSL のフォルダを WSL の中で扱う（環境変数を Linux のパスで渡す）
+    let (mut cmd, title, in_wsl) = if let Some(tool_id) = req.tool_id.as_deref() {
+        let tool = ai_tools::get(tool_id)?;
+        match &wsl {
+            Some(w) if tool.kind == "cli" => {
+                let c = wsl_tool_command(w, &tool, req.action_id.as_deref(), req.note.as_deref(), selection_file.as_deref())?;
+                (c, format!("{} (WSL)", tool.name), true)
+            }
+            _ => {
+                let (tool, path) = ai_tools::find(tool_id)?;
+                let vars = ai_tools::Vars::new(&root, req.note.as_deref(), selection_file.as_deref());
+                let mut args = ai_tools::args_for(&tool, req.action_id.as_deref(), &vars)?;
+                // Claude Code には開いているファイルを伝えるフックを渡す。
+                // 以前の既定値のまま保存された ai-tools.json でも効くよう、定義に --settings がなければ足す
+                if tool.id == "claude-code" && !args.iter().any(|a| a == "--settings") {
+                    if let Ok(p) = ai_context::claude_settings_file() {
+                        args.splice(0..0, ["--settings".to_string(), p.to_string_lossy().into_owned()]);
+                    }
+                }
+                let tool_cwd = tool.launch.cwd.as_deref().map(|c| std::path::PathBuf::from(vars.expand(c))).filter(|p| p.is_dir());
+                let mut cmd = if tool.launch.shell.as_deref() == Some("none") {
+                    let mut c = CommandBuilder::new(&path);
+                    c.args(&args);
+                    c
+                } else {
+                    // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
+                    // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
+                    let ps = shells::powershell().ok_or("PowerShell が見つかりません")?;
+                    let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
+                        .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let mut c = CommandBuilder::new(&ps.program);
+                    c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
+                    c
+                };
+                cmd.cwd(tool_cwd.unwrap_or_else(|| cwd.clone()));
+                (cmd, tool.name, false)
             }
         }
-        let tool_cwd = tool.launch.cwd.as_deref().map(|c| std::path::PathBuf::from(vars.expand(c))).filter(|p| p.is_dir());
-        let cmd = if tool.launch.shell.as_deref() == Some("none") {
-            let mut c = CommandBuilder::new(&path);
-            c.args(&args);
-            c
-        } else {
-            // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
-            // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
-            let ps = shells::powershell().ok_or("PowerShell が見つかりません")?;
-            let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
-                .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
-                .collect::<Vec<_>>()
-                .join(" ");
-            let mut c = CommandBuilder::new(&ps.program);
-            c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
-            c
-        };
-        let mut cmd = cmd;
-        cmd.cwd(tool_cwd.unwrap_or_else(|| cwd.clone()));
-        (cmd, tool.name)
     } else {
         let sh = shells::find(req.shell_id.as_deref()).ok_or("使えるシェルが見つかりません")?;
         let mut c = CommandBuilder::new(&sh.program);
         c.args(&sh.args);
-        if sh.wsl {
+        // 開いている WSL のフォルダと同じディストリビューションのシェルなら、Linux のパスに移動する
+        let same = wsl.as_ref().filter(|w| sh.wsl && sh.id == format!("wsl:{}", w.distro));
+        if let Some(w) = same {
+            c.args(["--cd", &w.linux_path(&cwd_rel)]);
+        } else if sh.wsl {
             c.args(["--cd", &cwd.to_string_lossy()]);
         }
         c.cwd(&cwd);
-        (c, sh.name.clone())
+        (c, sh.name.clone(), same.is_some())
     };
 
-    cmd.env("MARKSHELL_ROOT", root.to_string_lossy().as_ref());
-    if let Some(n) = &note_abs {
-        cmd.env("MARKSHELL_NOTE", n.to_string_lossy().as_ref());
+    match (&wsl, in_wsl) {
+        (Some(w), true) => {
+            cmd.env("MARKSHELL_ROOT", &w.linux_root);
+            if let Some(n) = req.note.as_deref() {
+                cmd.env("MARKSHELL_NOTE", w.linux_path(n));
+            }
+            cmd.env("WSLENV", "MARKSHELL_ROOT:MARKSHELL_NOTE:MARKSHELL_SELECTION_FILE/p:MARKSHELL_CONTEXT_FILE/p");
+        }
+        _ => {
+            cmd.env("MARKSHELL_ROOT", root.to_string_lossy().as_ref());
+            if let Some(n) = &note_abs {
+                cmd.env("MARKSHELL_NOTE", n.to_string_lossy().as_ref());
+            }
+            cmd.env("WSLENV", "MARKSHELL_ROOT/p:MARKSHELL_NOTE/p:MARKSHELL_SELECTION_FILE/p:MARKSHELL_CONTEXT_FILE/p");
+        }
     }
     if let Some(s) = &selection_file {
         cmd.env("MARKSHELL_SELECTION_FILE", s.to_string_lossy().as_ref());
     }
     cmd.env("MARKSHELL_CONTEXT_FILE", ai_context::context_file().to_string_lossy().as_ref());
-    cmd.env("WSLENV", "MARKSHELL_ROOT/p:MARKSHELL_NOTE/p:MARKSHELL_SELECTION_FILE/p:MARKSHELL_CONTEXT_FILE/p");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "mark-shell");
 

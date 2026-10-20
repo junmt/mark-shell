@@ -14,6 +14,7 @@ import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   api,
+  NOT_TEXT_PREFIX,
   errorMessage,
   type Change,
   type Entry,
@@ -24,6 +25,7 @@ import {
   type ShellInfo,
   type SpawnRequest,
   type ToolInfo,
+  type WslInfo,
 } from './api';
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
@@ -108,6 +110,8 @@ class Store {
   keepDirs = new SvelteSet<string>();
   selected = $state<string | null>(null);
   recent = $state<string[]>([]);
+  /** WSL のフォルダを開いているとき（ターミナルと AI ツールは WSL の中で動く） */
+  wsl = $state<WslInfo | null>(null);
 
   // ---- タブ ----
   docs = $state<Doc[]>([]);
@@ -151,7 +155,7 @@ class Store {
   dialog = $state<DialogRequest | null>(null);
   toasts = $state<Toast[]>([]);
   menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
-  palette = $state<'files' | 'commands' | null>(null);
+  palette = $state<'files' | 'commands' | 'folders' | null>(null);
   settingsOpen = $state(false);
   conflict = $state<{ doc: Doc; disk: ReadResult } | null>(null);
   diff = $state<{ title: string; before: string; after: string } | null>(null);
@@ -168,7 +172,8 @@ class Store {
   get tree(): TreeNode {
     void this.treeVersion;
     return buildTree(this.entries.values(), {
-      showEmptyDirs: this.config.showEmptyDirs,
+      // 空のフォルダも含めてすべて出す
+      showEmptyDirs: true,
       sort: this.config.treeSort,
       keepDirs: this.keepDirs,
     });
@@ -213,7 +218,7 @@ class Store {
       this.scanDoneGen = e.payload.gen;
       this.scanTruncated = e.payload.truncated;
       if (e.payload.truncated) {
-        this.toast(`ファイルが多すぎるため ${e.payload.files.toLocaleString()} 件で探索を止めました。設定の「除外するパターン」で対象を絞ってください。`, 'error');
+        this.toast(`ファイルが多すぎるため ${e.payload.files.toLocaleString()} 件で探索を止めました。中のフォルダを開くなど、より狭い範囲を開いてください。`, 'error');
       }
     });
     await listen<{ changes: Change[] }>('fs:change', (e) => this.onFsChange(e.payload.changes));
@@ -314,10 +319,18 @@ class Store {
     if (typeof dir === 'string') await this.openRoot(dir);
   }
 
+  /** 最近開いたフォルダを名前で絞り込んで選ぶ */
+  async chooseRecentRoot() {
+    this.recent = await api.getRecent();
+    this.palette = 'folders';
+  }
+
   async openRoot(path: string) {
     await this.saveAll();
     if (this.root) this.saveWorkspaceStateNow();
     let res;
+    // WSL のフォルダは、初回に WSL へエージェントを置いて起動するので数秒かかる
+    if (/^\\\\(\?\\UNC\\)?wsl(\.localhost|\$)\\/i.test(path)) this.toast('WSL に接続しています…');
     try {
       res = await api.openRoot(path);
     } catch (e) {
@@ -329,6 +342,10 @@ class Store {
     this.adoptScanGen(res.gen);
     this.root = res.root;
     this.rootName = res.name;
+    this.wsl = res.wsl;
+    if (res.wslError) this.toast(`WSL のエージェントを使えないため、変更の自動反映などが動きません: ${res.wslError}`, 'error');
+    // WSL のフォルダでは AI ツールを WSL の中で探し直す
+    void this.refreshAiTools();
     this.expanded.clear();
     this.keepDirs.clear();
     this.aiChanged.clear();
@@ -552,10 +569,17 @@ class Store {
     try {
       r = await api.readFile(path);
     } catch (e) {
+      const msg = errorMessage(e);
       if (opts.missingOk) {
         r = { content: '', encoding: 'utf-8', eol: 'lf', readonly: false, mtime: 0 };
+      } else if (msg.startsWith(NOT_TEXT_PREFIX)) {
+        // 画像や Office のファイルなどは、Windows の既定のアプリで開けるようにする
+        if (opts.quiet) return;
+        const ok = await this.confirm('ファイルを開く', `${msg.slice(NOT_TEXT_PREFIX.length)}。既定のアプリで開きますか？`, '既定のアプリで開く');
+        if (ok) await api.openWithDefaultApp(path).catch((err) => this.toast(errorMessage(err), 'error'));
+        return;
       } else {
-        if (!opts.quiet) this.toast(errorMessage(e), 'error');
+        if (!opts.quiet) this.toast(msg, 'error');
         return;
       }
     }
@@ -988,7 +1012,9 @@ class Store {
     void this.syncAiContext();
     const doc = this.activeDoc;
     const selection = this.view && doc ? this.view.state.sliceDoc(this.view.state.selection.main.from, this.view.state.selection.main.to) : '';
-    const shellId = opts.shellId ?? (this.config.terminal.defaultShell || null);
+    // WSL のフォルダでは、シェルを指定しなければそのディストリビューションのシェルで開く
+    const wslShell = this.wsl ? this.shells.find((s) => s.id === `wsl:${this.wsl!.distro}`)?.id : undefined;
+    const shellId = opts.shellId ?? wslShell ?? (this.config.terminal.defaultShell || null);
     // シェル未指定なら Rust 側と同じく PowerShell 7 → Windows PowerShell の順で使われる
     const shell =
       this.shells.find((s) => s.id === shellId) ?? this.shells.find((s) => s.id === 'pwsh') ?? this.shells.find((s) => s.id === 'powershell');
@@ -1203,7 +1229,7 @@ class Store {
     } catch (e) {
       this.toast(errorMessage(e), 'error');
     }
-    const scanKeys: (keyof Config)[] = ['markdownExtensions', 'textExtensions','excludePatterns', 'respectGitignore', 'followSymlinks'];
+    const scanKeys: (keyof Config)[] = ['markdownExtensions', 'followSymlinks'];
     if (scanKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(this.config[k])) && this.root) {
       await this.openRoot(this.root);
     }
@@ -1278,6 +1304,7 @@ class Store {
     const doc = this.activeDoc;
     const list: Command[] = [
       { id: 'open', label: 'フォルダを開く', shortcut: 'Ctrl+O', run: () => void this.chooseRoot() },
+      { id: 'openRecent', label: '最近開いたフォルダを開く', shortcut: 'Ctrl+R', run: () => void this.chooseRecentRoot() },
       { id: 'newWindow', label: '新しいウィンドウ', run: () => void api.openNewWindow() },
       { id: 'newFile', label: '新しいファイル', shortcut: 'Ctrl+N', run: () => void this.newFile() },
       { id: 'newFolder', label: '新しいフォルダ', run: () => void this.newFolder() },

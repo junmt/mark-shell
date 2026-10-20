@@ -1,30 +1,22 @@
-//! ルートディレクトリの再帰探索とファイル操作。データベースは使わず、毎回ファイルシステムを読む。
+//! ルートディレクトリの探索とファイル操作。データベースは使わず、毎回ファイルシステムを読む。
+//! WSL のフォルダでは、全体をたどる処理（探索・リンクの書き換え）とごみ箱への移動を WSL のエージェントに任せる
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use base64::Engine;
-use ignore::{WalkBuilder, WalkState};
+use markshell_core::links::Plan;
+use markshell_core::scan::{self, Entry};
 use serde::Serialize;
+use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::paths::{self, mtime_ms, normalize_rel, resolve, to_rel, FilterConfig};
 use crate::state::AppState;
+use crate::wsl::{self, WslInfo, WslRoot};
 use crate::{config, links, textio, watcher};
-
-/// これを超えたら探索を止める
-const MAX_FILES: usize = 50_000;
-const BATCH: usize = 500;
-
-#[derive(Serialize, Clone, Debug)]
-pub struct Entry {
-    pub path: String,
-    pub dir: bool,
-    pub mtime: u64,
-    pub size: u64,
-}
 
 #[derive(Serialize, Clone)]
 struct ScanBatch {
@@ -40,126 +32,37 @@ struct ScanDone {
     truncated: bool,
 }
 
-pub fn walker(root: &Path, start: &Path, filter: &Arc<FilterConfig>) -> WalkBuilder {
-    let mut b = WalkBuilder::new(start);
-    b.hidden(true)
-        .git_ignore(filter.respect_gitignore)
-        .git_exclude(filter.respect_gitignore)
-        .git_global(false)
-        .ignore(filter.respect_gitignore)
-        .parents(true)
-        .require_git(false)
-        .follow_links(filter.follow_symlinks);
-    let f = filter.clone();
-    let root = root.to_path_buf();
-    b.filter_entry(move |e| {
-        if e.depth() == 0 {
-            return true;
-        }
-        let name = e.file_name().to_string_lossy();
-        let rel = to_rel(&root, e.path()).unwrap_or_default();
-        !f.is_excluded(&name, &rel)
-    });
-    b
-}
-
-/// `start` 以下を並列に探索し、見つかったエントリを `on_batch` に渡す
-pub fn scan<F>(root: &Path, start: &Path, filter: &Arc<FilterConfig>, cancel: impl Fn() -> bool + Sync, mut on_batch: F) -> (usize, usize, bool)
-where
-    F: FnMut(Vec<Entry>),
-{
-    let (tx, rx) = mpsc::channel::<Entry>();
-    let stop = Arc::new(AtomicBool::new(false));
-    let files = AtomicU64::new(0);
-    let truncated = AtomicBool::new(false);
-    let mut dirs = 0usize;
-    let mut file_count = 0usize;
-
-    std::thread::scope(|s| {
-        let walker = walker(root, start, filter).build_parallel();
-        let stop2 = stop.clone();
-        let files = &files;
-        let truncated = &truncated;
-        let cancel = &cancel;
-        s.spawn(move || {
-            walker.run(|| {
-                let tx = tx.clone();
-                let stop = stop2.clone();
-                Box::new(move |res| {
-                    if stop.load(Ordering::Relaxed) || cancel() {
-                        return WalkState::Quit;
-                    }
-                    let Ok(e) = res else { return WalkState::Continue };
-                    if e.depth() == 0 {
-                        return WalkState::Continue;
-                    }
-                    let Some(ft) = e.file_type() else { return WalkState::Continue };
-                    let is_dir = ft.is_dir();
-                    if !is_dir && !filter.is_listed(e.path()) {
-                        return WalkState::Continue;
-                    }
-                    if !is_dir && files.fetch_add(1, Ordering::Relaxed) as usize >= MAX_FILES {
-                        truncated.store(true, Ordering::Relaxed);
-                        stop.store(true, Ordering::Relaxed);
-                        return WalkState::Quit;
-                    }
-                    let Some(rel) = to_rel(root, e.path()) else { return WalkState::Continue };
-                    let meta = e.metadata().ok();
-                    let entry = Entry {
-                        path: rel,
-                        dir: is_dir,
-                        mtime: meta.as_ref().map(mtime_ms).unwrap_or(0),
-                        size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
-                    };
-                    if tx.send(entry).is_err() {
-                        return WalkState::Quit;
-                    }
-                    WalkState::Continue
-                })
-            });
-        });
-
-        let mut buf = Vec::with_capacity(BATCH);
-        for e in rx {
-            if e.dir {
-                dirs += 1;
-            } else {
-                file_count += 1;
-            }
-            buf.push(e);
-            if buf.len() >= BATCH {
-                on_batch(std::mem::take(&mut buf));
-            }
-        }
-        if !buf.is_empty() {
-            on_batch(buf);
-        }
-    });
-    (file_count.min(MAX_FILES), dirs, truncated.load(Ordering::Relaxed))
-}
-
-fn start_scan(app: &AppHandle, state: &AppState, root: PathBuf) -> u64 {
+/// 探索を始める。結果は scan:batch / scan:done で届く
+fn start_scan(app: &AppHandle, state: &AppState, root: PathBuf) -> Result<u64, String> {
     let gen = state.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Some(wsl) = state.wsl() {
+        wsl.agent.request("scan", json!({ "gen": gen }))?;
+        return Ok(gen);
+    }
     let gen_ref = state.scan_gen.clone();
     let filter = state.filter();
     let app = app.clone();
     std::thread::spawn(move || {
         let cancel = || gen_ref.load(Ordering::Relaxed) != gen;
-        let (files, dirs, truncated) = scan(&root, &root, &filter, cancel, |entries| {
+        let s = scan::scan(&root, &root, &filter, cancel, |entries| {
             let _ = app.emit("scan:batch", ScanBatch { gen, entries });
         });
-        let _ = app.emit("scan:done", ScanDone { gen, files, dirs, truncated });
+        let _ = app.emit("scan:done", ScanDone { gen, files: s.files, dirs: s.dirs, truncated: s.truncated });
     });
-    gen
+    Ok(gen)
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenResult {
     root: String,
     name: String,
     gen: u64,
+    /// WSL のフォルダなら、そのディストリビューションと Linux 側のパス
+    wsl: Option<WslInfo>,
+    /// WSL のフォルダだがエージェントを使えなかったときの理由（\wsl.localhost 経由だけで扱う）
+    wsl_error: Option<String>,
 }
-
 /// 起動時のコマンドライン引数で指定されたフォルダ
 #[tauri::command]
 pub fn get_launch_root() -> Option<String> {
@@ -169,34 +72,58 @@ pub fn get_launch_root() -> Option<String> {
 }
 
 #[tauri::command]
-pub fn open_root(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<OpenResult, String> {
-    let p = std::path::absolute(PathBuf::from(&path)).map_err(|e| e.to_string())?;
+pub async fn open_root(app: AppHandle, path: String) -> Result<OpenResult, String> {
+    // WSL のエージェントの起動には数秒かかることがあるので、画面を止めないよう別スレッドで行う
+    tauri::async_runtime::spawn_blocking(move || open_root_blocking(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn open_root_blocking(app: &AppHandle, path: &str) -> Result<OpenResult, String> {
+    let state = app.state::<AppState>();
+    let p = std::path::absolute(PathBuf::from(path)).map_err(|e| e.to_string())?;
     if !p.is_dir() {
         return Err(format!("フォルダが見つかりません: {path}"));
     }
+    // WSL のフォルダなら、探索・検索・監視を WSL のエージェントに任せる
+    let (wsl_root, wsl_error) = match wsl::parse_unc(&p.to_string_lossy()) {
+        Some((distro, linux)) => match WslRoot::open(app, &distro, &linux, &config::read_config()) {
+            Ok(w) => (Some(w), None),
+            Err(e) => (None, Some(e)),
+        },
+        None => (None, None),
+    };
+    *state.wsl.write().unwrap() = wsl_root.clone();
     *state.root.write().unwrap() = Some(p.clone());
-    let gen = start_scan(&app, &state, p.clone());
 
-    // 監視を張り直す（古い監視は drop で止まる）
-    let w = watcher::start(app.clone(), p.clone(), state.filter()).map_err(|e| e.to_string());
-    *state.watcher.lock().unwrap() = w.ok();
+    // 監視を張り直す（古い監視は drop で止まる）。WSL ではエージェントが監視する
+    *state.watcher.lock().unwrap() = None;
+    if wsl_root.is_none() {
+        *state.watcher.lock().unwrap() = watcher::start(app.clone(), p.clone(), state.filter()).ok();
+    }
+    let gen = start_scan(app, &state, p.clone())?;
 
     let root_str = p.to_string_lossy().into_owned();
     config::push_recent(&root_str);
     let name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
+        .or_else(|| wsl_root.as_ref().map(|w| w.linux_root.rsplit('/').next().unwrap_or("/").to_string()))
         .unwrap_or_else(|| root_str.clone());
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_title(&format!("{name} - mark-shell"));
+        let title = match &wsl_root {
+            Some(w) => format!("{name} [WSL: {}] - mark-shell", w.distro),
+            None => format!("{name} - mark-shell"),
+        };
+        let _ = w.set_title(&title);
     }
-    Ok(OpenResult { root: root_str, name, gen })
+    Ok(OpenResult { root: root_str, name, gen, wsl: wsl_root.map(|w| w.info()), wsl_error })
 }
 
 #[tauri::command]
 pub fn rescan(app: AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
     let root = state.root()?;
-    Ok(start_scan(&app, &state, root))
+    start_scan(&app, &state, root)
 }
 
 #[derive(Serialize)]
@@ -210,22 +137,25 @@ pub struct ReadResult {
 
 /// エディタで開けるファイルの大きさの上限。大きなログでも画面が固まらない程度にする
 const MAX_OPEN_BYTES: u64 = 50 * 1024 * 1024;
+/// エディタで開けないファイル（バイナリ・大きすぎる）のエラーに付ける印（画面側の api.ts と同じ）
+const NOT_TEXT_PREFIX: &str = "not-text:";
 
 #[tauri::command]
 pub fn read_file(state: State<'_, AppState>, path: String) -> Result<ReadResult, String> {
     let root = state.root()?;
     let p = resolve(&root, &path)?;
     let meta = fs::metadata(&p).map_err(|e| format!("{path} を開けません: {e}"))?;
+    // 先頭の NOT_TEXT_PREFIX を見て、画面側は既定のアプリで開くか尋ねる
     if meta.len() > MAX_OPEN_BYTES {
         return Err(format!(
-            "{path} は大きすぎるため開けません（{} MB。開けるのは {} MB まで）",
+            "{NOT_TEXT_PREFIX}{path} は大きすぎるためエディタでは開けません（{} MB。開けるのは {} MB まで）",
             meta.len() / 1024 / 1024,
             MAX_OPEN_BYTES / 1024 / 1024
         ));
     }
     let bytes = fs::read(&p).map_err(|e| format!("{path} を読めません: {e}"))?;
     if textio::looks_binary(&bytes) {
-        return Err(format!("{path} はテキストファイルではないため開けません"));
+        return Err(format!("{NOT_TEXT_PREFIX}{path} はテキストファイルではないため、エディタでは開けません"));
     }
     let d = textio::decode(&bytes);
     Ok(ReadResult {
@@ -282,15 +212,27 @@ pub fn create_dir(state: State<'_, AppState>, path: String) -> Result<String, St
     Ok(rel)
 }
 
+/// リンクの書き換え（apply が false なら数えるだけ）。WSL のフォルダではエージェントが行う
+async fn link_plan(app: &AppHandle, from: String, to: String, apply: bool) -> Result<Plan, String> {
+    let state = app.state::<AppState>();
+    let root = state.root()?;
+    let filter: Arc<FilterConfig> = state.filter();
+    let wsl = state.wsl();
+    tauri::async_runtime::spawn_blocking(move || match wsl {
+        Some(wsl) => {
+            let r = wsl.agent.request("linkPlan", json!({ "from": from, "to": to, "apply": apply }))?;
+            serde_json::from_value(r).map_err(|e| e.to_string())
+        }
+        None => links::plan(&root, &filter, &from, &to, apply),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 名前変更・移動で書き換わるリンクの数
 #[tauri::command]
 pub async fn count_link_updates(app: AppHandle, from: String, to: String) -> Result<usize, String> {
-    let state = app.state::<AppState>();
-    let root = state.root()?;
-    let filter = state.filter();
-    tauri::async_runtime::spawn_blocking(move || links::plan(&root, &filter, &from, &to, false).map(|r| r.links))
-        .await
-        .map_err(|e| e.to_string())?
+    link_plan(&app, from, to, false).await.map(|r| r.links)
 }
 
 #[derive(Serialize)]
@@ -302,9 +244,7 @@ pub struct RenameResult {
 
 #[tauri::command]
 pub async fn rename_path(app: AppHandle, from: String, to: String, rewrite_links: bool) -> Result<RenameResult, String> {
-    let state = app.state::<AppState>();
-    let root = state.root()?;
-    let filter = state.filter();
+    let root = app.state::<AppState>().root()?;
     let from = normalize_rel(&from).ok_or("不正なパスです")?;
     let to = normalize_rel(&to).ok_or("不正なパスです")?;
     if to.is_empty() || from.is_empty() {
@@ -325,10 +265,7 @@ pub async fn rename_path(app: AppHandle, from: String, to: String, rewrite_links
     fs::rename(&src, &dst).map_err(|e| format!("移動できません: {e}"))?;
 
     let (links, files) = if rewrite_links {
-        let (f, t) = (from.clone(), to.clone());
-        let r = tauri::async_runtime::spawn_blocking(move || links::plan(&root, &filter, &f, &t, true))
-            .await
-            .map_err(|e| e.to_string())??;
+        let r = link_plan(&app, from.clone(), to.clone(), true).await?;
         (r.links, r.files)
     } else {
         (0, vec![])
@@ -342,6 +279,10 @@ pub fn delete_path(state: State<'_, AppState>, path: String) -> Result<(), Strin
     let rel = normalize_rel(&path).ok_or("不正なパスです")?;
     if rel.is_empty() {
         return Err("ルートディレクトリは削除できません".into());
+    }
+    // Windows のごみ箱は \\wsl.localhost のファイルを扱えないので、WSL では Linux のごみ箱に移す
+    if let Some(wsl) = state.wsl() {
+        return wsl.agent.request("trash", json!({ "path": rel })).map(|_| ());
     }
     let p = resolve(&root, &rel)?;
     trash::delete(&p).map_err(|e| format!("ごみ箱へ移動できません: {e}"))
@@ -470,6 +411,14 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Result<()
         cmd.raw_arg(format!("/select,\"{}\"", p.display()));
     }
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 画像や Office のファイルなど、エディタで開けないファイルを Windows の既定のアプリで開く
+#[tauri::command]
+pub fn open_with_default_app(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let root = state.root()?;
+    let p = resolve(&root, &path)?;
+    tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| format!("{path} を開けません: {e}"))
 }
 
 /// インストーラーで入れたものか（隣にアンインストーラーがある）。

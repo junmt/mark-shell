@@ -52,6 +52,16 @@
           run: () => void store.openFile(f, { pin: true }),
         }));
     }
+    if (store.palette === 'folders') {
+      const q = query.trim();
+      return store.recent
+        .filter((r) => r !== store.root)
+        .map((r) => ({ r, name: r.split(/[\\/]/).filter(Boolean).pop() ?? r }))
+        .map((x) => ({ ...x, s: Math.max(score(x.name, q) * 2, score(x.r, q)) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => (q ? b.s - a.s : 0))
+        .map(({ r, name }) => ({ key: r, label: name, detail: r, run: () => void store.openRoot(r) }));
+    }
     if (store.palette === 'commands') {
       return store
         .commands()
@@ -95,12 +105,12 @@
 
 {#if store.palette}
   <div class="backdrop" role="presentation" onclick={close}></div>
-  <div class="palette" role="dialog" aria-label={store.palette === 'files' ? 'ファイルを開く' : 'コマンド'}>
+  <div class="palette" role="dialog" aria-label={{ files: 'ファイルを開く', commands: 'コマンド', folders: '最近開いたフォルダ' }[store.palette]}>
     <input
       bind:this={input}
       bind:value={query}
       onkeydown={keydown}
-      placeholder={store.palette === 'files' ? 'ファイル名で検索' : 'コマンドを検索'}
+      placeholder={{ files: 'ファイル名で検索', commands: 'コマンドを検索', folders: '最近開いたフォルダを名前で検索' }[store.palette]}
       spellcheck="false"
     />
     <div class="list">

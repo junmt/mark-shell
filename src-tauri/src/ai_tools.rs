@@ -195,8 +195,24 @@ fn detect(tool: &ToolDef) -> Option<PathBuf> {
         .find(|p| p.exists())
 }
 
+pub fn get(id: &str) -> Result<ToolDef, String> {
+    load().into_iter().find(|t| t.id == id).ok_or_else(|| format!("AI ツール {id} が定義されていません"))
+}
+
+impl ToolDef {
+    /// 実行するコマンド名（WSL の中で探すときに使う）
+    pub fn command_name(&self) -> Option<&str> {
+        self.launch.command.as_deref().or(self.detect.command.as_deref())
+    }
+}
+
+/// WSL のフォルダを開いているとき、CLI のツールは WSL の中で探す（ログインシェルの PATH で）
+pub fn find_in_wsl(tool: &ToolDef, wsl: &crate::wsl::WslRoot) -> Option<String> {
+    (tool.kind == "cli").then(|| tool.command_name().and_then(|c| wsl.which(c))).flatten()
+}
+
 pub fn find(id: &str) -> Result<(ToolDef, PathBuf), String> {
-    let tool = load().into_iter().find(|t| t.id == id).ok_or_else(|| format!("AI ツール {id} が定義されていません"))?;
+    let tool = get(id)?;
     let path = match &tool.launch.command {
         Some(c) => which::which(c).ok().or_else(|| Some(PathBuf::from(expand_env(c)))).filter(|p| p.exists()),
         None => detect(&tool),
@@ -229,7 +245,8 @@ impl Vars {
     pub fn expand(&self, s: &str) -> String {
         let mut out = s.to_string();
         // 開いているファイルを Claude Code に伝えるフック定義（ai_context.rs）。使うときだけ書き出す
-        if out.contains("${claudeSettings}") {
+        // WSL の中で起動するときは、呼び出し側が WSL から見たパスを map に入れておく
+        if out.contains("${claudeSettings}") && !self.map.contains_key("claudeSettings") {
             if let Ok(p) = crate::ai_context::claude_settings_file() {
                 out = out.replace("${claudeSettings}", &p.to_string_lossy());
             }
@@ -257,12 +274,18 @@ pub fn ps_quote(s: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn list_ai_tools() -> Vec<ToolInfo> {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn list_ai_tools(app: tauri::AppHandle) -> Vec<ToolInfo> {
+    use tauri::Manager;
+    let wsl = app.state::<crate::state::AppState>().wsl();
+    tauri::async_runtime::spawn_blocking(move || {
         load()
             .into_iter()
             .map(|t| {
-                let path = detect(&t);
+                // WSL のフォルダでは CLI のツールを WSL の中で探す
+                let path = match &wsl {
+                    Some(w) if t.kind == "cli" => find_in_wsl(&t, w).map(PathBuf::from),
+                    _ => detect(&t),
+                };
                 ToolInfo {
                     found: path.is_some(),
                     path: path.map(|p| p.to_string_lossy().into_owned()),

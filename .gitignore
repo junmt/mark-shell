@@ -3,3 +3,6 @@ dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 *.log
+
+# 共通部品と WSL 用エージェントのビルド結果
+crates/*/target/

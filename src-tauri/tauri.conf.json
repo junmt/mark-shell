@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "mark-shell",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "identifier": "jp.co.thinkingreed.markshell",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run agent && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run agent && npm run build",
     "frontendDist": "../dist"
   },
   "app": {

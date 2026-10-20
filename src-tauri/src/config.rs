@@ -60,6 +60,9 @@ pub fn get_config() -> Value {
 pub fn set_config(state: State<'_, AppState>, config: Value) -> Result<(), String> {
     write_json(&config_dir().join("config.json"), &config)?;
     *state.filter.write().unwrap() = Arc::new(FilterConfig::from_config(&config));
+    if let Some(wsl) = state.wsl() {
+        wsl.agent.request("config", serde_json::json!({ "config": config }))?;
+    }
     Ok(())
 }
 

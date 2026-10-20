@@ -20,11 +20,17 @@ jobs:
           node-version: 22
           cache: npm
 
+      # WSL 用エージェントは Linux 向け（musl）に、Windows 上で rust-lld でビルドしてアプリに埋め込む
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates/core
+            crates/agent
 
       - name: タグからバージョンを設定する
         shell: pwsh
@@ -43,7 +49,9 @@ jobs:
         run: |
           npm run check
           npm test
-          cd src-tauri
+          cd crates/core
+          cargo test
+          cd ../../src-tauri
           cargo test
 
       - uses: tauri-apps/tauri-action@v0

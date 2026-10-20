@@ -90,6 +90,8 @@
     if (mod) {
       if (key === 'p') return run(() => (store.palette = 'files'));
       if (key === 'o') return run(() => void store.chooseRoot());
+      // WebView の再読み込み（編集中の内容が消えうる）の代わりに、最近のフォルダを選ぶ
+      if (key === 'r') return run(() => void store.chooseRecentRoot());
       if (key === 'n') return run(() => void store.newFile());
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
       if (key === 'w') return run(() => store.activeDoc && void store.closeTab(store.activeDoc.path));

@@ -1,16 +1,17 @@
 mod ai_context;
 mod ai_tools;
 mod config;
-mod links;
-mod paths;
 mod protocol;
 mod pty;
 mod search;
 mod shells;
 mod state;
-mod textio;
 mod watcher;
 mod workspace;
+mod wsl;
+
+// Windows 版と WSL 用エージェントで共有する処理
+use markshell_core::{links, paths, textio};
 
 use state::AppState;
 
@@ -59,6 +60,7 @@ pub fn run() {
             workspace::absolute_path,
             workspace::open_new_window,
             workspace::is_installed,
+            workspace::open_with_default_app,
             search::search_start,
             search::search_cancel,
             search::replace_in_files,

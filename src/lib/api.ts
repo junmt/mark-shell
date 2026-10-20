@@ -16,7 +16,8 @@ export type ReadResult = {
   mtime: number;
 };
 
-export type OpenResult = { root: string; name: string; gen: number };
+export type WslInfo = { distro: string; linuxRoot: string };
+export type OpenResult = { root: string; name: string; gen: number; wsl: WslInfo | null; wslError: string | null };
 export type RecoveryEntry = { path: string; content: string; time: number };
 
 export type SearchOptions = {
@@ -87,6 +88,7 @@ export const api = {
   absolutePath: (path: string) => invoke<string>('absolute_path', { path }),
   openNewWindow: (path?: string) => invoke<void>('open_new_window', { path }),
   isInstalled: () => invoke<boolean>('is_installed'),
+  openWithDefaultApp: (path: string) => invoke<void>('open_with_default_app', { path }),
 
   searchStart: (options: SearchOptions) => invoke<number>('search_start', { options }),
   searchCancel: () => invoke<void>('search_cancel'),
@@ -107,6 +109,9 @@ export const api = {
 };
 
 export { Channel };
+
+/** エディタで開けないファイル（バイナリ・大きすぎる）のエラーに付く印（Rust 側の workspace.rs と同じ） */
+export const NOT_TEXT_PREFIX = 'not-text:';
 
 export function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e;

@@ -6,6 +6,7 @@
     void api.getRecent().then((recent) => {
       const items: MenuItem[] = [
         { label: 'フォルダを開く…', shortcut: 'Ctrl+O', action: () => void store.chooseRoot() },
+        { label: '最近開いたフォルダから選ぶ…', shortcut: 'Ctrl+R', action: () => void store.chooseRecentRoot() },
         { label: '新しいウィンドウ', action: () => void api.openNewWindow() },
       ];
       if (recent.length) {

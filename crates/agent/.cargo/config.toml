@@ -1,0 +1,3 @@
+# Windows 上で Linux 用（musl・静的リンク）にビルドする。C のコードを含まないので rust-lld だけでリンクできる
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"

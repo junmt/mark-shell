@@ -1,14 +1,15 @@
 {
   "name": "mark-shell",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "agent": "cd crates/agent && cargo build --release --target x86_64-unknown-linux-musl"
   },
   "overrides": {
     "katex": "$katex"

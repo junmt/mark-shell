@@ -6,9 +6,7 @@
   import type { Config } from '../lib/config';
 
   let draft = $state<Config | null>(null);
-  let excludeText = $state('');
   let extText = $state('');
-  let textExtText = $state('');
   let explorerMenu = $state(false);
 
   // 開いたときだけ設定を写し取る（draft を読むと自分で書いた値に反応して繰り返してしまう）
@@ -16,9 +14,7 @@
     if (store.settingsOpen) {
       const c = untrack(() => $state.snapshot(store.config) as Config);
       draft = c;
-      excludeText = c.excludePatterns.join('\n');
       extText = c.markdownExtensions.join(', ');
-      textExtText = c.textExtensions.join(', ');
       void api.isExplorerMenuRegistered().then((v) => (explorerMenu = v));
     } else {
       draft = null;
@@ -27,10 +23,8 @@
 
   async function save() {
     if (!draft) return;
-    draft.excludePatterns = excludeText.split('\n').map((s) => s.trim()).filter(Boolean);
     draft.markdownExtensions = extText.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
     if (draft.markdownExtensions.length === 0) draft.markdownExtensions = ['md'];
-    draft.textExtensions = textExtText.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
     const next = draft;
     store.settingsOpen = false;
     await store.updateConfig(next);
@@ -93,16 +87,8 @@
 
       <section>
         <h3>ファイルツリー</h3>
-        <label>Markdown の拡張子（カンマ区切り） <input bind:value={extText} /></label>
-        <label>そのほかに開くテキストファイルの拡張子（カンマ区切り。プレビューなしで編集できる。<code>log</code> を入れると <code>app.log.1</code> なども対象）
-          <input bind:value={textExtText} />
-        </label>
-        <label>除外するパターン（1 行に 1 つ。例: <code>archive</code>、<code>drafts/**</code>）
-          <textarea rows="3" bind:value={excludeText} spellcheck="false"></textarea>
-        </label>
-        <label class="check"><input type="checkbox" bind:checked={draft.respectGitignore} /> .gitignore に書かれたものを除外する</label>
+        <label>Markdown として扱う拡張子（カンマ区切り。ほかのファイルもツリーに出し、テキストならプレビューなしで編集できる） <input bind:value={extText} /></label>
         <label class="check"><input type="checkbox" bind:checked={draft.followSymlinks} /> シンボリックリンク・ジャンクションをたどる</label>
-        <label class="check"><input type="checkbox" bind:checked={draft.showEmptyDirs} /> 対象のファイルを含まないフォルダも表示する</label>
         <label>並び順
           <select bind:value={draft.treeSort}>
             <option value="name">名前順</option>
@@ -224,11 +210,6 @@
 
   input[type='number'] {
     width: 120px;
-  }
-
-  textarea {
-    font-family: var(--editor-mono);
-    resize: vertical;
   }
 
   .note {

@@ -64,11 +64,41 @@ pub fn claude_settings_file() -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// WSL の中で動く Claude Code 用のフック定義。フックは WSL から Windows の mark-shell.exe を呼ぶ
+/// （WSL は /mnt/c/... の Windows の実行ファイルを直接起動できる）。戻り値は WSL から見たパス
+pub fn claude_settings_file_wsl(wsl: &crate::wsl::WslRoot) -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let settings = serde_json::json!({
+        "hooks": {
+            "UserPromptSubmit": [{
+                "hooks": [{
+                    "type": "command",
+                    "command": wsl.to_linux(&exe)?,
+                    "args": ["--ai-context"],
+                    "timeout": 10
+                }]
+            }]
+        }
+    });
+    let path = local_dir().join("claude-settings-wsl.json");
+    let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        std::fs::create_dir_all(local_dir()).map_err(|e| e.to_string())?;
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    }
+    wsl.to_linux(&path)
+}
+
 /// 画面側から、開いているファイルと選択範囲が変わるたびに呼ばれる
 #[tauri::command]
 pub fn set_ai_context(state: State<'_, AppState>, note: Option<String>, selection: Option<Selection>) -> Result<(), String> {
     let root = state.root()?;
-    let note_abs = note.as_deref().and_then(|n| resolve(&root, n).ok());
+    // WSL のフォルダでは、WSL の中で動く AI ツールに合わせて Linux のパスで伝える
+    let note_abs = match (state.wsl(), note.as_deref()) {
+        (Some(w), Some(n)) => Some(PathBuf::from(w.linux_path(n))),
+        (None, Some(n)) => resolve(&root, n).ok(),
+        _ => None,
+    };
     let selection = selection.filter(|s| !s.text.is_empty()).map(|mut s| {
         if let Some((i, _)) = s.text.char_indices().nth(MAX_SELECTION_CHARS) {
             s.text.truncate(i);

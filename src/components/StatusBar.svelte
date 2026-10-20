@@ -9,7 +9,12 @@
 
 <footer class="status">
   {#if store.root}
-    <span title={store.root}>{store.root}</span>
+    {#if store.wsl}
+      <span class="wsl" title="WSL のフォルダ。ターミナルと AI ツールは WSL の中で動きます">WSL: {store.wsl.distro}</span>
+      <span title={store.root}>{store.wsl.linuxRoot}</span>
+    {:else}
+      <span title={store.root}>{store.root}</span>
+    {/if}
     {#if store.scanning}<span>読み込み中…</span>{/if}
   {/if}
   {#if store.aiRunning}<span class="ai">✦ AI セッション実行中</span>{/if}
@@ -49,7 +54,12 @@
     flex: 1;
   }
 
-  .ai {
+  .ai,
+  .wsl {
     color: var(--accent);
+  }
+
+  .wsl {
+    font-weight: 600;
   }
 </style>

@@ -9,13 +9,13 @@ use std::sync::{Arc, Mutex};
 
 use ignore::WalkState;
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::paths::{self, normalize_rel, relative, resolve, to_rel, FilterConfig};
 use crate::textio;
-use crate::workspace::walker;
+use crate::scan::walker;
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Plan {
     pub links: usize,
     pub files: Vec<String>,
@@ -140,7 +140,7 @@ pub fn plan(root: &Path, filter: &Arc<FilterConfig>, from: &str, to: &str, apply
 
     let result = Mutex::new(Plan::default());
     let error = Mutex::new(None::<String>);
-    walker(root, root, filter).build_parallel().run(|| {
+    walker(root, filter).build_parallel().run(|| {
         let mv = &mv;
         let result = &result;
         let error = &error;

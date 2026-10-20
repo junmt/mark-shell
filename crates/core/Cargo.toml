@@ -1,0 +1,19 @@
+[package]
+name = "markshell-core"
+version = "0.1.0"
+description = "mark-shell の Windows 版と WSL 用エージェントで共有する処理（探索・検索・監視・リンクの書き換え・文字コード）"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+regex = "1"
+notify = "8"
+encoding_rs = "0.8"
+chardetng = "0.1"
+percent-encoding = "2"
