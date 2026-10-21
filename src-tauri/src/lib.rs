@@ -54,6 +54,7 @@ pub fn run() {
             workspace::count_link_updates,
             workspace::delete_path,
             workspace::duplicate_path,
+            workspace::import_paths,
             workspace::save_asset,
             workspace::copy_asset,
             workspace::path_exists,

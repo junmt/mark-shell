@@ -111,6 +111,8 @@ class Store {
   expanded = new SvelteSet<string>();
   keepDirs = new SvelteSet<string>();
   selected = $state<string | null>(null);
+  /** 外からファイルをドラッグしている間、コピー先になるツリーのフォルダ（ルートは ''、ツリーの外なら null） */
+  fileDropDir = $state<string | null>(null);
   recent = $state<string[]>([]);
   /** WSL のフォルダを開いているとき（ターミナルと AI ツールは WSL の中で動く） */
   wsl = $state<WslInfo | null>(null);
@@ -246,8 +248,19 @@ class Store {
       this.searchTruncated = e.payload.truncated;
     });
 
+    // ファイルツリーの上に落としたらそのフォルダにコピー、それ以外は onDrop（画像のリンク・ファイルやフォルダを開く）
     await getCurrentWebview().onDragDropEvent((e) => {
-      if (e.payload.type === 'drop') void this.onDrop(e.payload.paths);
+      const p = e.payload;
+      if (p.type === 'leave') {
+        this.fileDropDir = null;
+      } else if (p.type === 'enter' || p.type === 'over') {
+        this.fileDropDir = this.treeDropDir(p.position);
+      } else if (p.type === 'drop') {
+        const dir = this.treeDropDir(p.position);
+        this.fileDropDir = null;
+        if (dir !== null) void this.importFiles(p.paths, dir);
+        else void this.onDrop(p.paths);
+      }
     });
     await getCurrentWindow().onCloseRequested(async () => {
       await this.saveAll();
@@ -997,6 +1010,36 @@ class Store {
   async plainPaste() {
     const text = await navigator.clipboard.readText();
     this.view?.dispatch(this.view.state.replaceSelection(text), { userEvent: 'input.paste', scrollIntoView: true });
+  }
+
+  /** 外からのドロップの位置（物理ピクセル）がファイルツリーの上なら、コピー先のフォルダ（ルートは ''）。外なら null */
+  private treeDropDir(pos: { x: number; y: number }): string | null {
+    if (!this.root) return null;
+    const scale = window.devicePixelRatio || 1;
+    const el = document.elementFromPoint(pos.x / scale, pos.y / scale);
+    if (!el?.closest('.tree')) return null;
+    const path = el.closest<HTMLElement>('[data-path]')?.dataset.path;
+    if (path === undefined) return '';
+    return this.entries.get(path)?.dir ? path : dirname(path);
+  }
+
+  /** ファイルツリーに落としたファイル・フォルダを dir にコピーする */
+  async importFiles(paths: string[], dir: string) {
+    try {
+      const copied = await api.importPaths(paths, dir);
+      if (copied.length === 0) return;
+      if (dir) this.expanded.add(dir);
+      this.revealInTree(copied[0]);
+      this.selected = copied[0];
+      const where = dir || this.rootName;
+      this.toast(
+        copied.length === 1
+          ? tr(`${basename(copied[0])} を ${where} にコピーしました`, `Copied ${basename(copied[0])} to ${where}`, `已将 ${basename(copied[0])} 复制到 ${where}`)
+          : tr(`${copied.length} 個を ${where} にコピーしました`, `Copied ${copied.length} items to ${where}`, `已将 ${copied.length} 项复制到 ${where}`),
+      );
+    } catch (e) {
+      this.toast(errorMessage(e), 'error');
+    }
   }
 
   private async onDrop(paths: string[]) {

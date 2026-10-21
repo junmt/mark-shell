@@ -156,7 +156,7 @@
 
 <div
   class="tree"
-  class:drop-root={dropTarget === ''}
+  class:drop-root={dropTarget === '' || store.fileDropDir === ''}
   bind:this={listEl}
   bind:clientHeight={height}
   onscroll={() => (scrollTop = listEl?.scrollTop ?? 0)}
@@ -169,7 +169,11 @@
     <div class="empty">{tr('読み込み中…', 'Loading…', '正在加载…')}</div>
   {:else if visible.total === 0}
     <div class="empty">
-      {tr('Markdown ファイルがありません。', 'No Markdown files.', '没有 Markdown 文件。')}
+      {tr(
+        'ファイルがありません。ここにファイルをドロップするとコピーできます。',
+        'No files. Drop files here to copy them in.',
+        '没有文件。将文件拖放到此处即可复制进来。',
+      )}
       <button class="link" onclick={() => void store.newFile('')}>{tr('新しいファイルを作る', 'Create a new file', '新建文件')}</button>
     </div>
   {/if}
@@ -180,7 +184,7 @@
         class="row"
         class:selected={store.selected === node.path}
         class:active={store.activePath === node.path}
-        class:drop={dropTarget !== null && dropTarget !== '' && dropTarget === node.path}
+        class:drop={(dropTarget !== null && dropTarget !== '' && dropTarget === node.path) || (!!store.fileDropDir && store.fileDropDir === node.path)}
         class:dragging={drag?.active && drag.path === node.path}
         style:top="{(visible.start + i) * ROW}px"
         style:padding-left="{8 + row.depth * 14}px"

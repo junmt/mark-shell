@@ -337,6 +337,31 @@ fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
 }
 
+/// エクスプローラーなどからファイルツリーにドロップしたファイル・フォルダを、ルート内のフォルダ（dest_dir）にコピーする。
+/// 同じ名前があれば `名前 (2).md` のように番号を付ける。戻り値はコピー先（ルートからの相対パス）
+#[tauri::command]
+pub async fn import_paths(app: AppHandle, sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, String> {
+    let root = app.state::<AppState>().root()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = normalize_rel(&dest_dir).ok_or_else(paths::invalid_path)?;
+        let dir_abs = resolve(&root, &dir)?;
+        let mut copied = Vec::new();
+        for s in sources {
+            let src = PathBuf::from(&s);
+            let Some(name) = src.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            if dir_abs.starts_with(&src) {
+                return Err(tr!("{name} をその中にコピーすることはできません", "Cannot copy {name} into itself", "无法将 {name} 复制到其自身内部"));
+            }
+            let target = unique_path(&root, &paths::join_rel(&dir, &name), "")?;
+            copy_recursive(&src, &resolve(&root, &target)?).map_err(|e| tr!("{name} をコピーできません: {e}", "Cannot copy {name}: {e}", "无法复制 {name}：{e}"))?;
+            copied.push(target);
+        }
+        Ok(copied)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn duplicate_path(state: State<'_, AppState>, path: String) -> Result<String, String> {
     let root = state.root()?;

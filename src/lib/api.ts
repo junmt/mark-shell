@@ -80,6 +80,7 @@ export const api = {
     invoke<{ path: string; links: number; files: string[] }>('rename_path', { from, to, rewriteLinks }),
   deletePath: (path: string) => invoke<void>('delete_path', { path }),
   duplicatePath: (path: string) => invoke<string>('duplicate_path', { path }),
+  importPaths: (sources: string[], destDir: string) => invoke<string[]>('import_paths', { sources, destDir }),
   saveAsset: (note: string, data: string, ext: string, folder: string) =>
     invoke<string>('save_asset', { note, data, ext, folder }),
   copyAsset: (note: string, source: string, folder: string) => invoke<string>('copy_asset', { note, source, folder }),
