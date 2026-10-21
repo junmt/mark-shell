@@ -64,12 +64,33 @@ pub struct OpenResult {
     /// WSL のフォルダだがエージェントを使えなかったときの理由（\wsl.localhost 経由だけで扱う）
     wsl_error: Option<String>,
 }
-/// 起動時のコマンドライン引数で指定されたフォルダ
+
+/// 起動時のコマンドライン引数で指定されたフォルダかファイル（エクスプローラーの右クリックメニューから）
 #[tauri::command]
-pub fn get_launch_root() -> Option<String> {
+pub fn get_launch_target() -> Option<LaunchTarget> {
     let arg = std::env::args().nth(1)?;
     let p = std::path::absolute(PathBuf::from(arg.trim_matches('"'))).ok()?;
-    p.is_dir().then(|| p.to_string_lossy().into_owned())
+    if p.is_dir() {
+        return Some(LaunchTarget { root: p.to_string_lossy().into_owned(), file: None });
+    }
+    if !p.is_file() {
+        return None;
+    }
+    // ファイルなら、それを含む最近開いたフォルダ（新しい順）を開く。なければファイルのあるフォルダ
+    let root = config::read_recent()
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|r| p.starts_with(r) && r.is_dir())
+        .or_else(|| p.parent().map(Path::to_path_buf))?;
+    let file = to_rel(&root, &p)?;
+    Some(LaunchTarget { root: root.to_string_lossy().into_owned(), file: Some(file) })
+}
+
+/// 起動時に開くフォルダと、ファイルを指定されたときはそのファイル（ルートからの相対パス）
+#[derive(Serialize)]
+pub struct LaunchTarget {
+    root: String,
+    file: Option<String>,
 }
 
 #[tauri::command]

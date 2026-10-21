@@ -6,6 +6,7 @@
   import { EDITOR_FONT, TERMINAL_FONT, type Config } from '../lib/config';
   import { COLOR_KEYS, DEFAULT_FONTS, FONT_SUGGESTIONS, PRESETS, colorLabel, fontStack, presetFor, presetLabel, resolveTheme, type ColorKey } from '../lib/themes';
   import { LANGUAGE_LABELS, tr, type LanguageSetting } from '../lib/i18n.svelte';
+  import Icon from './Icon.svelte';
 
   const languages = Object.entries(LANGUAGE_LABELS) as [LanguageSetting, string][];
   /** フォントの見本（CJK の字形が分かるように漢字を入れる） */
@@ -56,9 +57,16 @@
     try {
       await api.registerExplorerMenu(!explorerMenu);
       explorerMenu = !explorerMenu;
+      // 起動時の登録し直しもこの選択に従う
+      if (draft) draft.explorerMenu = explorerMenu;
+      await store.updateConfig({ explorerMenu });
       store.toast(
         explorerMenu
-          ? tr('エクスプローラーの右クリックメニューに「mark-shell で開く」を追加しました', 'Added "Open with mark-shell" to the Explorer context menu', '已将“用 mark-shell 打开”添加到资源管理器右键菜单')
+          ? tr(
+              'エクスプローラーの右クリックメニュー（フォルダとファイル）に「mark-shell で開く」を追加しました',
+              'Added "Open with mark-shell" to the Explorer context menu (folders and files)',
+              '已将“用 mark-shell 打开”添加到资源管理器右键菜单（文件夹和文件）',
+            )
           : tr('右クリックメニューから外しました', 'Removed from the context menu', '已从右键菜单中移除'),
       );
     } catch (e) {
@@ -141,7 +149,8 @@
           <!-- 見本。保存すると画面全体に反映する -->
           <div class="swatch" style:background={sample.colors.bg} style:color={sample.colors.fg} style:border-color={sample.colors.border}>
             <div class="swatch-pane" style:background={sample.colors.bgPane} style:color={sample.colors.fgMuted} style:border-color={sample.colors.border}>
-              📁 {tr('メモ', 'Notes', '笔记')}<br />　memo.md
+              <div class="swatch-row"><Icon name="folderOpen" size={14} />{tr('メモ', 'Notes', '笔记')}</div>
+              <div class="swatch-row indent"><Icon name="fileText" size={14} />memo.md</div>
             </div>
             <div class="swatch-body">
               <div style:color={sample.colors.mdHeading} class="swatch-heading">{tr('見出し', 'Heading', '标题')}</div>
@@ -396,6 +405,16 @@
     padding: 8px 10px;
     border-right: 1px solid;
     white-space: nowrap;
+  }
+
+  .swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .swatch-row.indent {
+    padding-left: 14px;
   }
 
   .swatch-body {

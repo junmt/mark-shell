@@ -94,7 +94,7 @@ fn recent_path() -> PathBuf {
     local_dir().join("recent.json")
 }
 
-fn read_recent() -> Vec<String> {
+pub fn read_recent() -> Vec<String> {
     read_json(&recent_path())
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default()
@@ -182,9 +182,11 @@ pub fn list_recovery(state: State<'_, AppState>) -> Result<Vec<RecoveryEntry>, S
 
 // ---- エクスプローラーの右クリックメニュー（HKCU なので管理者権限は不要） ----
 
-const MENU_KEYS: &[&str] = &[
-    r"HKCU\Software\Classes\Directory\shell\mark-shell",
-    r"HKCU\Software\Classes\Directory\Background\shell\mark-shell",
+/// （キー, 渡す引数）。フォルダ・フォルダの空いている所・ファイルで「mark-shell で開く」を出す
+const MENU_KEYS: &[(&str, &str)] = &[
+    (r"HKCU\Software\Classes\Directory\shell\mark-shell", "%1"),
+    (r"HKCU\Software\Classes\Directory\Background\shell\mark-shell", "%V"),
+    (r"HKCU\Software\Classes\*\shell\mark-shell", "%1"),
 ];
 
 fn reg(args: &[&str]) -> Result<(), String> {
@@ -201,32 +203,37 @@ fn reg(args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// 右クリックメニューに登録する（enable が false なら外す）。起動のたびにも呼ばれ、
+/// アップデートや移動で変わった実行ファイルの場所と、メニューの言語を登録し直す
 #[tauri::command]
-pub fn register_explorer_menu(enable: bool) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe = exe.to_string_lossy();
-    // メニューの文言は登録したときの言語になる
-    let label = markshell_core::tr!("mark-shell で開く", "Open with mark-shell", "用 mark-shell 打开");
-    for (i, key) in MENU_KEYS.iter().enumerate() {
-        if enable {
-            let arg = if i == 0 { "%1" } else { "%V" };
-            reg(&["add", key, "/ve", "/d", &label, "/f"])?;
-            reg(&["add", key, "/v", "Icon", "/d", &exe, "/f"])?;
-            let cmd_key = format!(r"{key}\command");
-            let cmd = format!("\"{exe}\" \"{arg}\"");
-            reg(&["add", &cmd_key, "/ve", "/d", &cmd, "/f"])?;
-        } else {
-            let _ = reg(&["delete", key, "/f"]);
+pub async fn register_explorer_menu(enable: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe = exe.to_string_lossy();
+        // メニューの文言は登録したときの言語になる
+        let label = markshell_core::tr!("mark-shell で開く", "Open with mark-shell", "用 mark-shell 打开");
+        for (key, arg) in MENU_KEYS {
+            if enable {
+                reg(&["add", key, "/ve", "/d", &label, "/f"])?;
+                reg(&["add", key, "/v", "Icon", "/d", &exe, "/f"])?;
+                let cmd_key = format!(r"{key}\command");
+                let cmd = format!("\"{exe}\" \"{arg}\"");
+                reg(&["add", &cmd_key, "/ve", "/d", &cmd, "/f"])?;
+            } else {
+                let _ = reg(&["delete", key, "/f"]);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub fn is_explorer_menu_registered() -> bool {
     use std::os::windows::process::CommandExt;
     std::process::Command::new("reg.exe")
-        .args(["query", MENU_KEYS[0]])
+        .args(["query", MENU_KEYS[0].0])
         .creation_flags(0x0800_0000)
         .output()
         .map(|o| o.status.success())

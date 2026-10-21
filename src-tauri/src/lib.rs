@@ -43,7 +43,7 @@ pub fn run() {
             config::list_recovery,
             config::register_explorer_menu,
             config::is_explorer_menu_registered,
-            workspace::get_launch_root,
+            workspace::get_launch_target,
             workspace::open_root,
             workspace::rescan,
             workspace::read_file,

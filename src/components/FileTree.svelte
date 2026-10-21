@@ -2,8 +2,17 @@
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
-  import { basename, dirname, isInside, join } from '../lib/paths';
+  import { basename, dirname, isImage, isInside, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
+  import Icon, { type IconName } from './Icon.svelte';
+
+  /** フォルダ（開閉）・Markdown・画像・その他で描き分ける */
+  function iconFor(node: TreeNode): IconName {
+    if (node.dir) return store.expanded.has(node.path) ? 'folderOpen' : 'folder';
+    if (store.isMarkdown(node.path)) return 'fileText';
+    if (isImage(node.path)) return 'image';
+    return 'file';
+  }
 
   const ROW = 24;
   let listEl: HTMLDivElement | undefined = $state();
@@ -199,8 +208,10 @@
         oncontextmenu={(e) => contextMenu(e, node)}
         onpointerdown={(e) => pointerDown(e, node)}
       >
-        <span class="twisty">{node.dir ? (store.expanded.has(node.path) ? '▾' : '▸') : ''}</span>
-        <span class="icon">{node.dir ? '📁' : '📄'}</span>
+        <span class="twisty">
+          {#if node.dir}<Icon name={store.expanded.has(node.path) ? 'chevronDown' : 'chevronRight'} size={12} stroke={2} />{/if}
+        </span>
+        <span class="icon" class:dir={node.dir}><Icon name={iconFor(node)} size={15} /></span>
         <span class="name">{node.name}</span>
         {#if store.aiChanged.has(node.path)}<span class="badge" title={tr('AI セッション中に変更されました', 'Changed during an AI session', '在 AI 会话中被修改')}>AI</span>{/if}
         {#if store.docs.find((d) => d.path === node.path)?.dirty}<span class="dot">●</span>{/if}
@@ -263,15 +274,29 @@
   }
 
   .twisty {
-    width: 10px;
+    width: 12px;
     color: var(--fg-muted);
-    font-size: 10px;
     flex: none;
+    display: flex;
+    align-items: center;
   }
 
   .icon {
-    font-size: 12px;
     flex: none;
+    display: flex;
+    align-items: center;
+    color: var(--fg-muted);
+  }
+
+  .icon.dir {
+    color: var(--fg);
+    opacity: 0.75;
+  }
+
+  .row.active .icon,
+  .row.selected .icon {
+    color: var(--accent);
+    opacity: 1;
   }
 
   .name {

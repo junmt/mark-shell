@@ -67,7 +67,7 @@ export const api = {
   registerExplorerMenu: (enable: boolean) => invoke<void>('register_explorer_menu', { enable }),
   isExplorerMenuRegistered: () => invoke<boolean>('is_explorer_menu_registered'),
 
-  getLaunchRoot: () => invoke<string | null>('get_launch_root'),
+  getLaunchTarget: () => invoke<{ root: string; file: string | null } | null>('get_launch_target'),
   openRoot: (path: string) => invoke<OpenResult>('open_root', { path }),
   rescan: () => invoke<number>('rescan'),
   readFile: (path: string) => invoke<ReadResult>('read_file', { path }),

@@ -4,6 +4,7 @@
   import { store } from '../lib/store.svelte';
   import type { SearchHit } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
+  import Icon from './Icon.svelte';
 
   let input: HTMLInputElement | undefined = $state();
   let replacement = $state('');
@@ -90,7 +91,8 @@
 <div class="results">
   {#each groups as [path, hits] (path)}
     <button class="file" onclick={() => (collapsed.has(path) ? collapsed.delete(path) : collapsed.add(path))}>
-      <span class="twisty">{collapsed.has(path) ? '▸' : '▾'}</span>
+      <span class="twisty"><Icon name={collapsed.has(path) ? 'chevronRight' : 'chevronDown'} size={12} stroke={2} /></span>
+      <span class="ficon"><Icon name="fileText" size={14} /></span>
       <span class="fname">{path}</span>
       <span class="count">{hits.length}</span>
     </button>
@@ -170,8 +172,11 @@
     font-weight: 600;
   }
 
-  .twisty {
-    font-size: 10px;
+  .twisty,
+  .ficon {
+    display: flex;
+    align-items: center;
+    flex: none;
     color: var(--fg-muted);
   }
 

@@ -2,6 +2,7 @@
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
+  import Icon from './Icon.svelte';
 
   function openFolderMenu(e: MouseEvent) {
     void api.getRecent().then((recent) => {
@@ -42,18 +43,32 @@
 </script>
 
 <header class="toolbar">
-  <button class="icon-btn" title={tr('左ペイン (Ctrl+Shift+E)', 'Side panel (Ctrl+Shift+E)', '左侧面板 (Ctrl+Shift+E)')} class:on={store.leftVisible} onclick={() => store.toggleLeft()} disabled={!store.root}>☰</button>
+  <button class="icon-btn" title={tr('左ペイン (Ctrl+Shift+E)', 'Side panel (Ctrl+Shift+E)', '左侧面板 (Ctrl+Shift+E)')} class:on={store.leftVisible} onclick={() => store.toggleLeft()} disabled={!store.root}>
+    <Icon name="sidebar" />
+  </button>
   <button class="folder" onclick={openFolderMenu} title={tr('フォルダを開く (Ctrl+O)', 'Open folder (Ctrl+O)', '打开文件夹 (Ctrl+O)')}>
-    📁 {store.root ? store.rootName : tr('フォルダを開く', 'Open folder', '打开文件夹')} ▾
+    <Icon name="folder" />
+    <span class="label">{store.root ? store.rootName : tr('フォルダを開く', 'Open folder', '打开文件夹')}</span>
+    <Icon name="chevronDown" size={12} stroke={2} />
   </button>
   <div class="spacer"></div>
   {#if store.root}
-    <button class="icon-btn" title={tr('新しいファイル (Ctrl+N)', 'New file (Ctrl+N)', '新建文件 (Ctrl+N)')} onclick={() => void store.newFile()}>＋ {tr('新規', 'New', '新建')}</button>
-    <button class="icon-btn" title={tr('コマンドパレット (Ctrl+Shift+P)', 'Command palette (Ctrl+Shift+P)', '命令面板 (Ctrl+Shift+P)')} onclick={() => (store.palette = 'commands')}>⌘ {tr('コマンド', 'Commands', '命令')}</button>
-    <button class="icon-btn" class:on={store.terminalVisible} title={tr('ターミナル (Ctrl+`)', 'Terminal (Ctrl+`)', '终端 (Ctrl+`)')} onclick={() => store.toggleTerminal()}>&gt;_ {tr('ターミナル', 'Terminal', '终端')}</button>
-    <button class="icon-btn ai" title={tr('AI ツール', 'AI tools', 'AI 工具')} onclick={openAiMenu}>✦ AI ▾</button>
+    <button class="icon-btn" title={tr('新しいファイル (Ctrl+N)', 'New file (Ctrl+N)', '新建文件 (Ctrl+N)')} onclick={() => void store.newFile()}>
+      <Icon name="plus" /><span>{tr('新規', 'New', '新建')}</span>
+    </button>
+    <button class="icon-btn" title={tr('コマンドパレット (Ctrl+Shift+P)', 'Command palette (Ctrl+Shift+P)', '命令面板 (Ctrl+Shift+P)')} onclick={() => (store.palette = 'commands')}>
+      <Icon name="command" /><span>{tr('コマンド', 'Commands', '命令')}</span>
+    </button>
+    <button class="icon-btn" class:on={store.terminalVisible} title={tr('ターミナル (Ctrl+`)', 'Terminal (Ctrl+`)', '终端 (Ctrl+`)')} onclick={() => store.toggleTerminal()}>
+      <Icon name="terminal" /><span>{tr('ターミナル', 'Terminal', '终端')}</span>
+    </button>
+    <button class="icon-btn ai" title={tr('AI ツール', 'AI tools', 'AI 工具')} onclick={openAiMenu}>
+      <Icon name="sparkle" /><span>AI</span><Icon name="chevronDown" size={12} stroke={2} />
+    </button>
   {/if}
-  <button class="icon-btn" title={tr('設定 (Ctrl+,)', 'Settings (Ctrl+,)', '设置 (Ctrl+,)')} onclick={() => (store.settingsOpen = true)}>⚙</button>
+  <button class="icon-btn" title={tr('設定 (Ctrl+,)', 'Settings (Ctrl+,)', '设置 (Ctrl+,)')} onclick={() => (store.settingsOpen = true)}>
+    <Icon name="settings" />
+  </button>
 </header>
 
 <style>
@@ -68,17 +83,30 @@
     background: var(--bg-pane);
   }
 
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
   .folder {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     border: none;
     background: transparent;
+    color: var(--fg);
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
     font-weight: 600;
     max-width: 40vw;
+    white-space: nowrap;
+  }
+
+  .folder .label {
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .folder:hover {

@@ -25,6 +25,8 @@ export type Config = {
   followSymlinks: boolean;
   /** 起動時に GitHub のリリースを見て新しいバージョンを知らせる */
   checkUpdates: boolean;
+  /** エクスプローラーの右クリックメニュー「mark-shell で開く」を登録する（起動のたびに登録し直す） */
+  explorerMenu: boolean;
   treeSort: 'name' | 'mtime';
   externalImages: 'click' | 'always';
   imageFolder: string;
@@ -52,6 +54,7 @@ export const defaultConfig: Config = {
   markdownExtensions: ['md', 'markdown', 'mdx'],
   followSymlinks: false,
   checkUpdates: true,
+  explorerMenu: true,
   treeSort: 'name',
   externalImages: 'click',
   imageFolder: 'assets',

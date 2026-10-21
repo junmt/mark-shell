@@ -270,11 +270,16 @@ class Store {
     void api.listShells().then((s) => (this.shells = s));
     void this.refreshAiTools();
 
-    // 起動時に指定がなければ、前回開いていたフォルダを開く（なくなっていればようこそ画面）
-    const launch = await api.getLaunchRoot();
+    // 起動時に指定がなければ、前回開いていたフォルダを開く（なくなっていればようこそ画面）。
+    // エクスプローラーの右クリックからファイルを指定されたら、そのフォルダを開いてファイルを表示する
+    const launch = await api.getLaunchTarget();
     this.recent = await api.getRecent();
-    const target = launch ?? this.recent[0];
+    const target = launch?.root ?? this.recent[0];
     if (target) await this.openRoot(target);
+    if (launch?.file && this.root) await this.openFile(launch.file, { pin: true });
+
+    // エクスプローラーの右クリックメニューを登録し直す（実行ファイルの場所と言語を最新にする）。開発中は登録しない
+    if (this.config.explorerMenu && !import.meta.env.DEV) void api.registerExplorerMenu(true).catch(() => {});
 
     // 起動の邪魔をしないよう少し待ってから確認する。開発中は確認しない
     if (this.config.checkUpdates && !import.meta.env.DEV) setTimeout(() => void this.checkForUpdate(false), 5000);
