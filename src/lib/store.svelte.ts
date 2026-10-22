@@ -77,11 +77,33 @@ export class TermSession {
   ptyId = $state<number | null>(null);
   ai: boolean;
   request: Omit<SpawnRequest, 'cols' | 'rows'>;
+  /** AI ツールなどがターミナルに付けたタイトル（会話の題名など。先頭の稼働表示の記号は除く） */
+  osTitle = $state('');
+  private titleBusy = $state(false);
+  private outputActive = $state(false);
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 処理中か（タイトルのスピナーか、出力が続いているかで判断する） */
+  busy = $derived(!this.exited && (this.titleBusy || this.outputActive));
+
   constructor(key: number, title: string, request: Omit<SpawnRequest, 'cols' | 'rows'>, ai: boolean) {
     this.key = key;
     this.title = title;
     this.request = request;
     this.ai = ai;
+  }
+
+  /** OSC 0 / 2 のタイトル。Claude Code は処理中に点字のスピナー（⠂⠐ など）、待機中に ✳ を先頭に付ける */
+  setOsTitle(raw: string) {
+    const m = /^([⠀-⣿✳✻✽✶✢·*]+)\s*/u.exec(raw);
+    this.titleBusy = !!m && /[⠀-⣿]/u.test(m[1]);
+    this.osTitle = (m ? raw.slice(m[0].length) : raw).trim();
+  }
+
+  /** 出力が届いた。少しのあいだ出力がなければ処理中を解く */
+  markOutput() {
+    this.outputActive = true;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => (this.outputActive = false), 1500);
   }
 }
 

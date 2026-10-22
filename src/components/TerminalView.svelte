@@ -16,6 +16,8 @@
   let term: Terminal;
   let fit: FitAddon;
   let observer: ResizeObserver;
+  /** 履歴があってスクロールできるか（スクロールバーを常に出す） */
+  let scrollable = $state(false);
 
   const light: ITheme = {
     background: '#f3f4f6',
@@ -127,10 +129,22 @@
       if (store.config.terminal.copyOnSelect && term.hasSelection()) void copySelection();
     });
 
+    // xterm.js 6 のスクロールバーはマウスを重ねたときだけ出る。履歴があるときは常に出す
+    // （全画面のツールが使う代替バッファには履歴がないので出さない）
+    const updateScrollable = () => (scrollable = term.buffer.active.baseY > 0);
+    term.onWriteParsed(updateScrollable);
+    term.onResize(updateScrollable);
+    term.buffer.onBufferChange(updateScrollable);
+
+    // AI ツールなどが付けるタイトル（OSC 0 / 2）をタブに出す
+    term.onTitleChange((title) => session.setOsTitle(title));
+
     const channel = new Channel<PtyEvent>();
     channel.onmessage = (ev) => {
-      if (ev.type === 'data') term.write(ev.data);
-      else {
+      if (ev.type === 'data') {
+        term.write(ev.data);
+        session.markOutput();
+      } else {
         session.exited = true;
         const code = ev.code;
         const msg =
@@ -199,7 +213,7 @@
   }
 </script>
 
-<div class="term" bind:this={host} oncontextmenu={menu} role="presentation"></div>
+<div class="term" class:scrollable bind:this={host} oncontextmenu={menu} role="presentation"></div>
 
 <style>
   .term {
@@ -209,5 +223,11 @@
 
   .term :global(.xterm) {
     height: 100%;
+  }
+
+  /* 履歴があるときはスクロールバーを常に出す（xterm.js は普段 invisible にしている） */
+  .term.scrollable :global(.xterm-scrollable-element > .scrollbar.vertical.invisible) {
+    opacity: 1;
+    pointer-events: auto;
   }
 </style>
