@@ -307,6 +307,56 @@ export function chunksOf(a: string, b: string): readonly Chunk[] {
 
 // ================= 表示 =================
 
+/** 変わったファイルをツリーで並べるときの 1 行。フォルダはそのフォルダの中のファイル数を持つ */
+export type PathTreeRow<T> =
+  | { kind: 'dir'; path: string; name: string; depth: number; count: number }
+  | { kind: 'file'; item: T; name: string; depth: number };
+
+type PathNode<T> = { dirs: Map<string, PathNode<T>>; files: T[]; count: number };
+
+/**
+ * パスの一覧をフォルダのツリーにして、表示する順の行にする。フォルダが先、それぞれ名前順。
+ * フォルダ 1 つだけを含むフォルダは `a/b` のように 1 行にまとめる。閉じたフォルダ（collapsed が true）の中は出さない
+ */
+export function pathTreeRows<T extends { path: string }>(items: T[], collapsed: (dir: string) => boolean): PathTreeRow<T>[] {
+  const node = (): PathNode<T> => ({ dirs: new Map(), files: [], count: 0 });
+  const root = node();
+  for (const it of items) {
+    const parts = it.path.replace(/\/+$/, '').split('/');
+    let n = root;
+    n.count++;
+    for (const p of parts.slice(0, -1)) {
+      let c = n.dirs.get(p);
+      if (!c) n.dirs.set(p, (c = node()));
+      c.count++;
+      n = c;
+    }
+    n.files.push(it);
+  }
+  const cmp = (a: string, b: string) => a.localeCompare(b, 'ja');
+  const nameOf = (p: string) => p.replace(/\/+$/, '').split('/').pop() ?? p;
+  const out: PathTreeRow<T>[] = [];
+  const walk = (n: PathNode<T>, prefix: string, depth: number) => {
+    for (const [first, child] of [...n.dirs].sort((a, b) => cmp(a[0], b[0]))) {
+      let name = first;
+      let c = child;
+      while (c.files.length === 0 && c.dirs.size === 1) {
+        const [[k, v]] = c.dirs;
+        name += '/' + k;
+        c = v;
+      }
+      const path = prefix ? `${prefix}/${name}` : name;
+      out.push({ kind: 'dir', path, name, depth, count: c.count });
+      if (!collapsed(path)) walk(c, path, depth + 1);
+    }
+    for (const f of n.files.map((item) => ({ item, name: nameOf(item.path) })).sort((a, b) => cmp(a.name, b.name))) {
+      out.push({ kind: 'file', item: f.item, name: f.name, depth });
+    }
+  };
+  walk(root, '', 0);
+  return out;
+}
+
 export function shortHash(h: string): string {
   return h.slice(0, 7);
 }

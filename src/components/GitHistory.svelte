@@ -1,9 +1,9 @@
 <script lang="ts">
   import { git } from '../lib/git.svelte';
-  import { layoutGraph, shortHash, type Commit, type ChangedFile } from '../lib/git';
+  import { layoutGraph, pathTreeRows, shortHash, type Commit, type ChangedFile } from '../lib/git';
   import { store, type MenuItem } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
-  import { basename, dirname } from '../lib/paths';
+  import { SvelteSet } from 'svelte/reactivity';
   import Icon from './Icon.svelte';
 
   const ROW = 24;
@@ -106,15 +106,12 @@
     await git.loadLog(true);
   }
 
-  let sentinel: HTMLDivElement | undefined = $state();
-  $effect(() => {
-    if (!sentinel) return;
-    const io = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting) && !git.logDone && git.log.length) void git.loadLog(false);
-    });
-    io.observe(sentinel);
-    return () => io.disconnect();
-  });
+  /** コミットの変わったファイルで閉じたフォルダ（「ハッシュ:パス」） */
+  const closedDirs = new SvelteSet<string>();
+  function toggleDir(key: string) {
+    if (closedDirs.has(key)) closedDirs.delete(key);
+    else closedDirs.add(key);
+  }
 
   function date(sec: number) {
     return new Date(sec * 1000).toLocaleString();
@@ -195,28 +192,38 @@
               {#if d.commit.parents.length > 1}<span class="muted">{tr('（マージ。1 つめの親との差分）', '(merge; diff against first parent)', '（合并；与第一个父提交的差异）')}</span>{/if}
             </div>
             <pre class="message">{d.message}</pre>
-            {#each d.files as f (f.path)}
-              <div
-                class="dfile"
-                role="button"
-                tabindex="0"
-                title={f.orig ? `${f.orig} → ${f.path}` : f.path}
-                onclick={(e) => git.openCommitFile(d.commit, f, e.detail >= 2)}
-                onkeydown={(e) => e.key === 'Enter' && git.openCommitFile(d.commit, f, true)}
-                oncontextmenu={(e) => fileMenu(e, d.commit, f)}
-              >
-                <span class="fname" class:deleted={f.status === 'D'}>{basename(f.path)}</span>
-                <span class="fdir">{dirname(f.path)}</span>
-                <span class="code c-{f.status}">{f.status}</span>
-              </div>
+            {#each pathTreeRows(d.files, (p) => closedDirs.has(`${d.commit.hash}:${p}`)) as r (r.kind === 'dir' ? `d:${r.path}` : r.item.path)}
+              {#if r.kind === 'dir'}
+                {@const key = `${d.commit.hash}:${r.path}`}
+                <div class="dfile dir" role="button" tabindex="0" title={r.path} onclick={() => toggleDir(key)} onkeydown={(e) => e.key === 'Enter' && toggleDir(key)} style:padding-left="{r.depth * 12}px">
+                  <Icon name={closedDirs.has(key) ? 'chevronRight' : 'chevronDown'} size={11} stroke={2} />
+                  <span class="fname">{r.name}</span>
+                  <span class="dcount">{r.count}</span>
+                </div>
+              {:else}
+                {@const f = r.item}
+                <div
+                  class="dfile"
+                  role="button"
+                  tabindex="0"
+                  title={f.orig ? `${f.orig} → ${f.path}` : f.path}
+                  onclick={(e) => git.openCommitFile(d.commit, f, e.detail >= 2)}
+                  onkeydown={(e) => e.key === 'Enter' && git.openCommitFile(d.commit, f, true)}
+                  oncontextmenu={(e) => fileMenu(e, d.commit, f)}
+                  style:padding-left="{15 + r.depth * 12}px"
+                >
+                  <span class="fname" class:deleted={f.status === 'D'}>{r.name}</span>
+                  <span class="code c-{f.status}">{f.status}</span>
+                </div>
+              {/if}
             {/each}
           {/if}
         </div>
       {/if}
     {/each}
     {#if !git.logDone && git.log.length}
-      <div class="more" bind:this={sentinel}>
-        <button class="link" onclick={() => void git.loadLog(false)}>{tr('さらに読む', 'Load more', '加载更多')}</button>
+      <div class="more">
+        <button class="link" onclick={() => void git.loadLog(false)}>{tr(`さらに表示（${git.log.length} 件を表示中）`, `Show more (${git.log.length} shown)`, `显示更多（已显示 ${git.log.length} 个）`)}</button>
       </div>
     {/if}
   </div>
@@ -433,16 +440,18 @@
     text-decoration: line-through;
   }
 
-  .fdir {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
+  .dfile.dir {
+    gap: 4px;
     color: var(--fg-muted);
   }
 
+  .dcount {
+    margin-left: auto;
+    font-size: 11px;
+  }
+
   .code {
+    margin-left: auto;
     font-size: 11px;
     font-weight: 700;
     width: 12px;

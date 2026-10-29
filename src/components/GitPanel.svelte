@@ -1,6 +1,6 @@
 <script lang="ts">
   import { git } from '../lib/git.svelte';
-  import { sectionCode, type FileStatus, type Section } from '../lib/git';
+  import { pathTreeRows, sectionCode, type FileStatus, type PathTreeRow, type Section } from '../lib/git';
   import { store, type MenuItem } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { basename, dirname } from '../lib/paths';
@@ -102,7 +102,7 @@
       { label: tr('すべてのブランチの履歴', 'History of all branches', '所有分支的历史'), action: () => void git.showHistory('all') },
       { label: tr('リモートの追加…', 'Add remote…', '添加远程…'), action: () => void git.addRemote() },
       { label: '', separator: true },
-      { label: git.flat ? tr('フォルダごとに表示', 'Group by folder', '按文件夹显示') : tr('一覧で表示', 'Show as list', '以列表显示'), action: () => (git.flat = !git.flat) },
+      { label: git.flat ? tr('ツリーで表示', 'Show as tree', '以树形显示') : tr('一覧で表示', 'Show as list', '以列表显示'), action: () => (git.flat = !git.flat) },
       { label: tr('読み直す', 'Refresh', '刷新'), action: () => void git.refresh() },
     ];
     store.openMenu(e, items);
@@ -129,16 +129,14 @@
 
   const firstLineLong = $derived((git.message.split('\n')[0] ?? '').length > 72);
 
-  /** フォルダごとに並べるときの見出し */
-  function grouped(files: FileStatus[]): { dir: string; files: FileStatus[] }[] {
-    if (git.flat) return [{ dir: '', files }];
-    const map = new Map<string, FileStatus[]>();
-    for (const f of files) {
-      const d = dirname(f.path);
-      if (!map.has(d)) map.set(d, []);
-      map.get(d)!.push(f);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ja')).map(([dir, files]) => ({ dir, files }));
+  /** 一覧（flat）か、フォルダのツリーで並べた行。閉じたフォルダは「区分:パス」で覚える */
+  function rowsOf(id: Section, files: FileStatus[]): PathTreeRow<FileStatus>[] {
+    if (git.flat) return files.map((item) => ({ kind: 'file', item, name: basename(item.path), depth: 0 }));
+    return pathTreeRows(files, (d) => git.collapsed.has(`${id}:${d}`));
+  }
+
+  function filesIn(files: FileStatus[], dir: string): FileStatus[] {
+    return files.filter((f) => f.path.startsWith(dir + '/'));
   }
 </script>
 
@@ -266,9 +264,35 @@
               {#if sec.files.length === 0}
                 <div class="none">{tr('なし', 'None', '无')}</div>
               {/if}
-              {#each grouped(sec.files) as g (g.dir)}
-                {#if !git.flat && g.dir}<div class="dir" title={g.dir}>{g.dir}</div>{/if}
-                {#each g.files as f (f.path)}
+              {#each rowsOf(sec.id, sec.files) as r (r.kind === 'dir' ? `d:${r.path}` : r.item.path)}
+                {#if r.kind === 'dir'}
+                  {@const key = `${sec.id}:${r.path}`}
+                  {@const inDir = filesIn(sec.files, r.path)}
+                  <div
+                    class="file dir"
+                    role="button"
+                    tabindex="0"
+                    title={r.path}
+                    onclick={() => toggle(key)}
+                    onkeydown={(e) => e.key === 'Enter' && toggle(key)}
+                    style:padding-left="{14 + r.depth * 12}px"
+                  >
+                    <Icon name={git.collapsed.has(key) ? 'chevronRight' : 'chevronDown'} size={12} stroke={2} />
+                    <span class="fname">{r.name}</span>
+                    <span class="acts">
+                      {#if sec.id === 'staged'}
+                        <button class="icon-btn" title={tr('このフォルダのステージを外す', 'Unstage this folder', '取消暂存此文件夹')} onclick={(e) => (e.stopPropagation(), void git.unstage(inDir))}><Icon name="minus" size={13} /></button>
+                      {:else if sec.id === 'conflict'}
+                        <button class="icon-btn" title={tr('このフォルダを解決済みにする', 'Mark this folder as resolved', '将此文件夹标记为已解决')} onclick={(e) => (e.stopPropagation(), void git.markResolved(inDir))}><Icon name="check" size={13} /></button>
+                      {:else}
+                        <button class="icon-btn" title={tr('このフォルダの変更を破棄', 'Discard changes in this folder', '放弃此文件夹中的更改')} onclick={(e) => (e.stopPropagation(), void git.discard(inDir))}><Icon name="undo" size={13} /></button>
+                        <button class="icon-btn" title={tr('このフォルダをステージ', 'Stage this folder', '暂存此文件夹')} onclick={(e) => (e.stopPropagation(), void git.stage(inDir))}><Icon name="plus" size={13} /></button>
+                      {/if}
+                    </span>
+                    <span class="dcount">{r.count}</span>
+                  </div>
+                {:else}
+                  {@const f = r.item}
                   {@const rel = git.rootPath(f.path)}
                   {@const c = code(f, sec.id)}
                   <div
@@ -281,9 +305,9 @@
                     onclick={(e) => git.openChange(f, sec.id, e.detail >= 2)}
                     onkeydown={(e) => e.key === 'Enter' && git.openChange(f, sec.id, true)}
                     oncontextmenu={(e) => fileMenu(e, f, sec.id)}
-                    style:padding-left={!git.flat && g.dir ? '30px' : '20px'}
+                    style:padding-left="{(git.flat ? 20 : 30) + r.depth * 12}px"
                   >
-                    <span class="fname" class:deleted={c === 'D'}>{basename(f.path)}</span>
+                    <span class="fname" class:deleted={c === 'D'}>{r.name}</span>
                     {#if git.flat && dirname(f.path)}<span class="fdir">{dirname(f.path)}</span>{/if}
                     {#if rel === null}<span class="fdir">{tr('ルート外', 'outside root', '根目录外')}</span>{/if}
                     <span class="acts">
@@ -301,7 +325,7 @@
                     </span>
                     <span class="code c-{c === '!' ? 'x' : c}">{c}</span>
                   </div>
-                {/each}
+                {/if}
               {/each}
             {/if}
           {/if}
@@ -579,13 +603,19 @@
     font-size: 12px;
   }
 
-  .dir {
-    padding: 2px 8px 2px 20px;
-    font-size: 12px;
+  .file.dir {
+    gap: 4px;
     color: var(--fg-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+
+  .dcount {
+    margin-left: auto;
+    font-size: 11px;
+    flex: none;
+  }
+
+  .file.dir:hover .dcount {
+    margin-left: 0;
   }
 
   .file {

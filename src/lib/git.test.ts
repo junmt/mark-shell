@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChunk, applyLines, chunksOf, groupStatus, invalidBranchName, layoutGraph, repoToRoot, revertChunk, rootToRepo, type Commit, type FileStatus } from './git';
+import { applyChunk, applyLines, chunksOf, groupStatus, invalidBranchName, layoutGraph, pathTreeRows, repoToRoot, revertChunk, rootToRepo, type Commit, type FileStatus } from './git';
 
 const c = (hash: string, parents: string[]): Commit => ({ hash, parents, author: '', email: '', date: 0, refs: [], subject: '' });
 
@@ -99,4 +99,20 @@ it('ブランチ名', () => {
   expect(invalidBranchName('a b')).toBe(true);
   expect(invalidBranchName('a..b')).toBe(true);
   expect(invalidBranchName('x.lock')).toBe(true);
+});
+
+describe('pathTreeRows', () => {
+  const f = (path: string) => ({ path });
+  const show = (rows: ReturnType<typeof pathTreeRows<{ path: string }>>) =>
+    rows.map((r) => `${'  '.repeat(r.depth)}${r.kind === 'dir' ? `${r.name}/ (${r.count})` : r.name}`);
+
+  it('フォルダを先に、1 つだけのフォルダはまとめる', () => {
+    const rows = pathTreeRows([f('z.md'), f('src/lib/a.ts'), f('src/lib/b.ts'), f('docs/x/y/c.md'), f('src/d.ts')], () => false);
+    expect(show(rows)).toEqual(['docs/x/y/ (1)', '  c.md', 'src/ (3)', '  lib/ (2)', '    a.ts', '    b.ts', '  d.ts', 'z.md']);
+  });
+
+  it('閉じたフォルダの中は出さない', () => {
+    const rows = pathTreeRows([f('src/lib/a.ts'), f('src/d.ts')], (d) => d === 'src/lib');
+    expect(show(rows)).toEqual(['src/ (2)', '  lib/ (1)', '  d.ts']);
+  });
 });

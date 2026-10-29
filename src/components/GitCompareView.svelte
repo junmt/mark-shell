@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { git, type GitTab } from '../lib/git.svelte';
-  import { gitApi, shortHash, type Commit, type Compare } from '../lib/git';
+  import { gitApi, pathTreeRows, shortHash, type Commit, type Compare } from '../lib/git';
   import { store } from '../lib/store.svelte';
   import { errorMessage } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
-  import { basename, dirname } from '../lib/paths';
+  import { SvelteSet } from 'svelte/reactivity';
+  import Icon from './Icon.svelte';
 
   // 2 つのブランチ・コミットの比較（取り込むコミット・送るコミット・変わったファイル）
   let { tab: tabProp }: { tab: GitTab } = $props();
@@ -16,6 +17,13 @@
   let data = $state<Compare | null>(null);
   let error = $state<string | null>(null);
   let selected = $state<string[]>([]);
+  /** 変わったファイルで閉じたフォルダ */
+  const closedDirs = new SvelteSet<string>();
+
+  function toggleDir(path: string) {
+    if (closedDirs.has(path)) closedDirs.delete(path);
+    else closedDirs.add(path);
+  }
 
   async function load() {
     try {
@@ -90,10 +98,19 @@
       </section>
       <section>
         <h3>{tr('変わったファイル', 'Changed files', '更改的文件')} <span class="count">{data.files.length}</span></h3>
-        {#each data.files as f (f.path)}
-          <div class="row" role="button" tabindex="0" title={f.orig ? `${f.orig} → ${f.path}` : f.path} onclick={() => git.openCompareFile(c.base, c.target, f)} onkeydown={(e) => e.key === 'Enter' && git.openCompareFile(c.base, c.target, f)}>
-            <span class="code c-{f.status}">{f.status}</span><span class="fname">{basename(f.path)}</span><span class="when">{dirname(f.path)}</span>
-          </div>
+        {#each pathTreeRows(data.files, (p) => closedDirs.has(p)) as r (r.kind === 'dir' ? `d:${r.path}` : r.item.path)}
+          {#if r.kind === 'dir'}
+            <div class="row folder" role="button" tabindex="0" title={r.path} onclick={() => toggleDir(r.path)} onkeydown={(e) => e.key === 'Enter' && toggleDir(r.path)} style:padding-left="{14 + r.depth * 16}px">
+              <Icon name={closedDirs.has(r.path) ? 'chevronRight' : 'chevronDown'} size={12} stroke={2} />
+              <span class="fname">{r.name}</span>
+              <span class="when">{r.count}</span>
+            </div>
+          {:else}
+            {@const f = r.item}
+            <div class="row" role="button" tabindex="0" title={f.orig ? `${f.orig} → ${f.path}` : f.path} onclick={() => git.openCompareFile(c.base, c.target, f)} onkeydown={(e) => e.key === 'Enter' && git.openCompareFile(c.base, c.target, f)} style:padding-left="{14 + r.depth * 16}px">
+              <span class="code c-{f.status}">{f.status}</span><span class="fname">{r.name}</span>
+            </div>
+          {/if}
         {:else}
           <div class="none">{tr('なし', 'None', '无')}</div>
         {/each}
@@ -171,6 +188,11 @@
 
   .row.selected {
     background: var(--bg-active);
+  }
+
+  .row.folder {
+    gap: 4px;
+    color: var(--fg-muted);
   }
 
   .row code {

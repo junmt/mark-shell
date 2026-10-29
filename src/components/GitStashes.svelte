@@ -1,14 +1,21 @@
 <script lang="ts">
   import { git } from '../lib/git.svelte';
-  import { gitApi, type ChangedFile, type Stash } from '../lib/git';
+  import { gitApi, pathTreeRows, type ChangedFile, type Stash } from '../lib/git';
   import { store } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { errorMessage } from '../lib/api';
-  import { basename, dirname } from '../lib/paths';
+  import { SvelteSet } from 'svelte/reactivity';
   import Icon from './Icon.svelte';
 
   let open = $state<number | null>(null);
   let files = $state<ChangedFile[]>([]);
+  /** 開いたスタッシュのファイルで閉じたフォルダ */
+  const closedDirs = new SvelteSet<string>();
+
+  function toggleDir(path: string) {
+    if (closedDirs.has(path)) closedDirs.delete(path);
+    else closedDirs.add(path);
+  }
 
   function toggleSection() {
     if (git.collapsed.has('stashes')) git.collapsed.delete('stashes');
@@ -22,6 +29,7 @@
     }
     open = s.index;
     files = [];
+    closedDirs.clear();
     try {
       files = await gitApi.stashFiles(git.repoPath!, s.index);
     } catch (e) {
@@ -61,12 +69,20 @@
       </span>
     </div>
     {#if open === s.index}
-      {#each files as f (f.path)}
-        <div class="row file" role="button" tabindex="0" onclick={() => git.openStashFile(s.index, f)} onkeydown={(e) => e.key === 'Enter' && git.openStashFile(s.index, f)}>
-          <span class="name">{basename(f.path)}</span>
-          <span class="dir">{dirname(f.path)}</span>
-          <span class="code">{f.status}</span>
-        </div>
+      {#each pathTreeRows(files, (p) => closedDirs.has(p)) as r (r.kind === 'dir' ? `d:${r.path}` : r.item.path)}
+        {#if r.kind === 'dir'}
+          <div class="row file folder" role="button" tabindex="0" title={r.path} onclick={() => toggleDir(r.path)} onkeydown={(e) => e.key === 'Enter' && toggleDir(r.path)} style:padding-left="{30 + r.depth * 12}px">
+            <Icon name={closedDirs.has(r.path) ? 'chevronRight' : 'chevronDown'} size={11} stroke={2} />
+            <span class="name">{r.name}</span>
+            <span class="code">{r.count}</span>
+          </div>
+        {:else}
+          {@const f = r.item}
+          <div class="row file" role="button" tabindex="0" title={f.path} onclick={() => git.openStashFile(s.index, f)} onkeydown={(e) => e.key === 'Enter' && git.openStashFile(s.index, f)} style:padding-left="{46 + r.depth * 12}px">
+            <span class="name">{r.name}</span>
+            <span class="code">{f.status}</span>
+          </div>
+        {/if}
       {/each}
     {/if}
   {/each}
@@ -138,17 +154,7 @@
     text-overflow: ellipsis;
   }
 
-  .row.file .name {
-    flex: none;
-    max-width: 60%;
-  }
-
-  .dir {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
+  .row.folder {
     color: var(--fg-muted);
   }
 

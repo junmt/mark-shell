@@ -88,7 +88,8 @@ type DraftState = { message?: string; history?: string[] };
 
 /** 長い時間かかったら自動の更新を止める（ミリ秒） */
 const SLOW_STATUS = 5000;
-const LOG_PAGE = 200;
+/** 履歴を一度に読む件数。続きは「さらに表示」で読む */
+const LOG_PAGE = 100;
 
 class GitStore {
   // ---- 検出 ----
@@ -136,7 +137,8 @@ class GitStore {
 
   // ---- 画面 ----
   collapsed = new SvelteSet<string>(['branches', 'remotes', 'stashes', 'tags']);
-  flat = $state(true);
+  /** 変わったファイルを一覧で並べる（false ならフォルダのツリー） */
+  flat = $state(false);
   form = $state<FormRequest | null>(null);
   /** ファイルツリーの印（ルートからの相対パス → 記号）と、中に変更のあるフォルダ */
   marks = $state(new Map<string, string>());
