@@ -148,6 +148,25 @@ pub fn rescan(app: AppHandle, state: State<'_, AppState>) -> Result<u64, String>
     start_scan(&app, &state, root)
 }
 
+/// フォルダの直下を読む。探索が上限で止まったとき、画面側がフォルダを開いたところから補う
+#[tauri::command]
+pub async fn list_dir(app: AppHandle, path: String) -> Result<Vec<Entry>, String> {
+    let state = app.state::<AppState>();
+    let root = state.root()?;
+    let rel = normalize_rel(&path).ok_or_else(paths::invalid_path)?;
+    let filter = state.filter();
+    let wsl = state.wsl();
+    tauri::async_runtime::spawn_blocking(move || match wsl {
+        Some(wsl) => {
+            let r = wsl.agent.request("listDir", json!({ "path": rel }))?;
+            serde_json::from_value(r).map_err(|e| e.to_string())
+        }
+        None => Ok(scan::list_dir(&root, &resolve(&root, &rel)?, &filter)),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Serialize)]
 pub struct ReadResult {
     content: String,

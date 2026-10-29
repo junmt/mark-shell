@@ -70,6 +70,7 @@ export const api = {
   getLaunchTarget: () => invoke<{ root: string; file: string | null } | null>('get_launch_target'),
   openRoot: (path: string) => invoke<OpenResult>('open_root', { path }),
   rescan: () => invoke<number>('rescan'),
+  listDir: (path: string) => invoke<Entry[]>('list_dir', { path }),
   readFile: (path: string) => invoke<ReadResult>('read_file', { path }),
   writeFile: (path: string, content: string, encoding: string, eol: string) =>
     invoke<number>('write_file', { path, content, encoding, eol }),

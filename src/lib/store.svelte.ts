@@ -274,9 +274,9 @@ class Store {
         const n = e.payload.files.toLocaleString();
         this.toast(
           tr(
-            `ファイルが多すぎるため ${n} 件で探索を止めました。中のフォルダを開くなど、より狭い範囲を開いてください。`,
-            `Too many files. Stopped scanning at ${n} files. Open a narrower folder, such as a subfolder.`,
-            `文件过多，已在 ${n} 个时停止扫描。请打开范围更小的文件夹，例如其中的子文件夹。`,
+            `ファイルが多すぎるため ${n} 件で探索を止めました。ツリーでフォルダを開くと、その中身を読み込みます。`,
+            `Too many files. Stopped scanning at ${n} files. Expanding a folder in the tree loads its contents.`,
+            `文件过多，已在 ${n} 个时停止扫描。在文件树中展开文件夹即可加载其内容。`,
           ),
           'error',
         );
@@ -492,6 +492,31 @@ class Store {
   async rescan() {
     if (!this.root) return;
     this.adoptScanGen(await api.rescan());
+  }
+
+  /** 探索が上限で止まったとき、直下を読み足したフォルダ。探索の世代が変わったら空にする */
+  private filledDirs = new Set<string>();
+  private filledGen = 0;
+
+  /** 探索が上限で止まっていたら、ルートと開いているフォルダの直下を読み足す */
+  fillExpandedDirs() {
+    if (!this.root || this.scanning || !this.scanTruncated) return;
+    if (this.filledGen !== this.scanGen) {
+      this.filledGen = this.scanGen;
+      this.filledDirs.clear();
+    }
+    for (const dir of ['', ...this.expanded]) void this.fillDir(dir);
+  }
+
+  private async fillDir(dir: string) {
+    if (this.filledDirs.has(dir)) return;
+    this.filledDirs.add(dir);
+    const gen = this.scanGen;
+    const list = await api.listDir(dir).catch(() => null);
+    if (!list || gen !== this.scanGen) return;
+    // 監視で先に届いたものは新しいので上書きしない
+    for (const en of list) if (!this.entries.has(en.path)) this.entries.set(en.path, en);
+    this.treeVersion++;
   }
 
   /** gen が今の世代以上なら true。新しい世代なら一覧を空にして採用する */

@@ -127,6 +127,13 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
             Ok(json!({}))
         }
 
+        // フォルダの直下を読む（探索が上限で止まったときに画面側が補う）
+        "listDir" => {
+            let root = agent.root()?;
+            let dir = resolve(&root, &param::<String>(params, "path")?)?;
+            serde_json::to_value(scan::list_dir(&root, &dir, &agent.filter())).map_err(|e| e.to_string())
+        }
+
         // 全文検索。結果は search:batch / search:done で送る
         "search" => {
             let id: u64 = param(params, "id")?;

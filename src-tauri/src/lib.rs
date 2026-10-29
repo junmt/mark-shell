@@ -47,6 +47,7 @@ pub fn run() {
             workspace::get_launch_target,
             workspace::open_root,
             workspace::rescan,
+            workspace::list_dir,
             workspace::read_file,
             workspace::write_file,
             workspace::create_file,

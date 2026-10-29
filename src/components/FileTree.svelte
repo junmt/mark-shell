@@ -28,6 +28,9 @@
     return { start, items: rows.slice(start, end), total: rows.length };
   });
 
+  // 探索が上限で止まっていたら、開いたフォルダの中身をその場で読み足す
+  $effect(() => store.fillExpandedDirs());
+
   function click(node: TreeNode, e: MouseEvent) {
     store.selected = node.path;
     if (node.dir) {

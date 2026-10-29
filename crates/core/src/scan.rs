@@ -107,3 +107,46 @@ where
     });
     ScanSummary { files: file_count.min(MAX_FILES), dirs, truncated: truncated.load(Ordering::Relaxed) }
 }
+
+/// `dir` の直下だけを読む。探索が上限で止まったとき、開いたフォルダの中身を補うのに使う
+pub fn list_dir(root: &Path, dir: &Path, filter: &FilterConfig) -> Vec<Entry> {
+    let mut b = walker(dir, filter);
+    b.max_depth(Some(1));
+    b.build()
+        .filter_map(Result::ok)
+        .filter(|e| e.depth() == 1)
+        .filter_map(|e| {
+            let ft = e.file_type()?;
+            let path = to_rel(root, e.path())?;
+            let meta = e.metadata().ok();
+            Some(Entry {
+                path,
+                dir: ft.is_dir(),
+                mtime: meta.as_ref().map(mtime_ms).unwrap_or(0),
+                size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+            })
+        })
+        .take(MAX_FILES)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn list_dir_reads_only_direct_children() {
+        let root = std::env::temp_dir().join(format!("markshell-list-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/x.md"), "").unwrap();
+        std::fs::write(root.join("a/b/y.md"), "").unwrap();
+        let filter = FilterConfig::from_config(&Value::Null);
+
+        let mut got: Vec<_> = list_dir(&root, &root.join("a"), &filter).into_iter().map(|e| (e.path, e.dir)).collect();
+        got.sort();
+        assert_eq!(got, vec![("a/b".to_string(), true), ("a/x.md".to_string(), false)]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
