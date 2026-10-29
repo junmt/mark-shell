@@ -88,8 +88,6 @@ type DraftState = { message?: string; history?: string[] };
 
 /** 長い時間かかったら自動の更新を止める（ミリ秒） */
 const SLOW_STATUS = 5000;
-/** 履歴を一度に読む件数。続きは「さらに表示」で読む */
-const LOG_PAGE = 100;
 
 class GitStore {
   // ---- 検出 ----
@@ -350,7 +348,7 @@ class GitStore {
     const all = this.logRef === 'all';
     const refs = all || this.logRef === 'HEAD' ? [] : [this.logRef];
     try {
-      const limit = this.logFilter ? 2000 : LOG_PAGE;
+      const limit = this.logFilter ? 2000 : Math.max(1, store.config.gitLogPage || 50);
       const list = await gitApi.log(repo, { refs, all, path: this.historyPath, skip, limit });
       if (repo !== this.repoPath) return;
       this.log = reset ? list : [...this.log, ...list];

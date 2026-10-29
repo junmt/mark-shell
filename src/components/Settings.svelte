@@ -242,6 +242,9 @@
             <option value="inline">{tr('行内', 'Inline', '内联')}</option>
           </select>
         </label>
+        <label>{tr('履歴を一度に読む件数', 'Commits to load at a time', '每次加载的提交数')}
+          <input type="number" min="1" max="1000" bind:value={draft.gitLogPage} />
+        </label>
         <label class="check"><input type="checkbox" bind:checked={draft.gitGutter} /> {tr('エディタに変更の帯を出す', 'Show change bars in the editor', '在编辑器中显示更改标记')}</label>
         <label class="check"><input type="checkbox" bind:checked={draft.gitTreeColors} /> {tr('ファイルツリーで変更のあるファイルに色を付ける', 'Color changed files in the file tree', '在文件树中为已更改的文件着色')}</label>
       </section>

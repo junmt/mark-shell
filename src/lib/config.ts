@@ -41,6 +41,8 @@ export type Config = {
   gitCommitAll: 'ask' | 'always';
   /** 差分の表示: 'split'（左右）、'inline'（行内） */
   gitDiffMode: 'split' | 'inline';
+  /** 履歴を一度に読む件数。続きは「さらに表示」で読む */
+  gitLogPage: number;
   /** エディタの行番号の横に変更の帯を出す */
   gitGutter: boolean;
   /** ファイルツリーで変更のあるファイルに色と記号を付ける */
@@ -79,6 +81,7 @@ export const defaultConfig: Config = {
   gitAutoFetchMinutes: 5,
   gitCommitAll: 'ask',
   gitDiffMode: 'split',
+  gitLogPage: 50,
   gitGutter: true,
   gitTreeColors: true,
   terminal: {
