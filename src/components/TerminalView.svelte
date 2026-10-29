@@ -163,6 +163,12 @@
       .then((r) => {
         session.ptyId = r.id;
         resize();
+        // Git の操作を「ターミナルで実行」したときなど、起動したらすぐ入力するコマンド
+        if (session.input) {
+          const input = session.input;
+          session.input = null;
+          setTimeout(() => void api.ptyWrite(r.id, input + '\r').catch(() => {}), 600);
+        }
       })
       .catch((e) => {
         session.exited = true;

@@ -16,6 +16,9 @@
   import { store, type Doc } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { headings, slugify } from '../lib/markdown';
+  import { git } from '../lib/git.svelte';
+  import { applyChunk, revertChunk } from '../lib/git';
+  import { gitChunkAt, setGitBase } from '../lib/gitEditor';
 
   // 表示中のエディタは常に 1 つなので、エディタの状態に埋め込むコールバックは共通にする。
   // タブごとの EditorState を作り直さずに使い回せる
@@ -42,7 +45,38 @@
     onPlainPaste: () => void store.plainPaste(),
     convertHtml: htmlToMarkdown,
     onContextMenu: (e) => openEditorMenu(e),
+    onGitChunk: (view, pos, e) => openChunkMenu(view, pos, e),
   };
+
+  /** 変更の帯のクリック: 差分の表示・元に戻す・ステージ */
+  function openChunkMenu(view: EditorView, pos: number, e: MouseEvent) {
+    const doc = docOf.get(view);
+    const found = gitChunkAt(view.state, pos);
+    if (!doc || !found) return;
+    const base = found.base.toString();
+    const text = view.state.doc.toString();
+    store.openMenu(e, [
+      { label: tr('変更を表示', 'Show changes', '显示更改'), action: () => git.openWorkingDiff(doc.path) },
+      {
+        label: tr('この変更を元に戻す', 'Revert this change', '还原此更改'),
+        disabled: doc.readonly,
+        action: () => {
+          const next = revertChunk(base, text, found.chunk);
+          view.dispatch({ changes: minimalChange(text, next), userEvent: 'input' });
+        },
+      },
+      { label: tr('この変更をステージ', 'Stage this change', '暂存此更改'), action: () => void git.stageText(doc.path, applyChunk(base, text, found.chunk), doc.encoding, doc.eol) },
+    ]);
+  }
+
+  /** 前後の同じ部分を除いた置き換え（カーソルの位置を保つため） */
+  function minimalChange(a: string, b: string) {
+    let s = 0;
+    while (s < a.length && s < b.length && a[s] === b[s]) s++;
+    let e = 0;
+    while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+    return { from: s, to: a.length - e, insert: b.slice(s, b.length - e) };
+  }
 
   function openEditorMenu(e: MouseEvent) {
     const view = store.view;
@@ -110,7 +144,6 @@
   onMount(() => {
     view = new EditorView({ parent: host, state: stateFor(doc) });
     docOf.set(view, doc);
-    if (!store.isMarkdown(doc.path)) loadLanguageFor(view, doc.path);
     store.view = view;
     bridge.onScrollLine = (line) => {
       if (Date.now() - programmatic > 150) onscrollline(line);
@@ -151,6 +184,19 @@
         fontComp.reconfigure(fontTheme(c.editorFontSize, c.editorFontFamily)),
       ],
     });
+  });
+
+  // Markdown 以外のファイルの色付け。手動で選んだ言語が変わったら付け直す
+  $effect(() => {
+    const override = doc.language;
+    if (!view || store.isMarkdown(doc.path)) return;
+    void loadLanguageFor(view, doc.path, override).then((name) => (doc.languageName = name));
+  });
+
+  // Git のステージの内容が変わったら変更の帯を描き直す
+  $effect(() => {
+    const base = doc.gitBase;
+    view?.dispatch({ effects: setGitBase.of(base) });
   });
 
   /** 検索結果やアウトラインから指定された行・見出しへ移動する */

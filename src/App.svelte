@@ -17,6 +17,8 @@
   import Settings from './components/Settings.svelte';
   import Splitter from './components/Splitter.svelte';
   import TerminalList from './components/TerminalList.svelte';
+  import GitForm from './components/GitForm.svelte';
+  import { git } from './lib/git.svelte';
 
   let leftHeight = $state(600);
 
@@ -82,7 +84,7 @@
       return;
     }
     if (inTerminal(e) && (!(mod && e.shiftKey) || key === 'c' || key === 'v')) return;
-    if (store.dialog || store.palette) return;
+    if (store.dialog || store.palette || git.form) return;
 
     const run = (fn: () => void) => {
       e.preventDefault();
@@ -93,6 +95,7 @@
       if (key === 'p') return run(() => (store.palette = 'commands'));
       if (key === 'f') return run(() => store.showLeft('search'));
       if (key === 'e') return run(() => store.toggleLeft());
+      if (key === 'g') return run(() => store.showLeft('git'));
       if (key === 'v') return run(() => store.cycleMode());
       return;
     }
@@ -103,7 +106,7 @@
       if (key === 'r') return run(() => void store.chooseRecentRoot());
       if (key === 'n') return run(() => void store.newFile());
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
-      if (key === 'w') return run(() => store.activeDoc && void store.closeTab(store.activeDoc.path));
+      if (key === 'w') return run(() => store.activePath && void store.closeTab(store.activePath));
       if (key === ',') return run(() => (store.settingsOpen = true));
       if (key === 'tab') return run(() => store.cycleTab(e.shiftKey ? -1 : 1));
     }
@@ -157,6 +160,7 @@
 
 <Palette />
 <Dialog />
+<GitForm />
 <ContextMenu />
 <ConflictDialog />
 <DiffDialog />

@@ -15,6 +15,8 @@
 | ディレクトリ探索 | ignore（Rust、ripgrep のライブラリ） | 並列での再帰探索 |
 | 全文検索 | grep-searcher / grep-regex（Rust、ripgrep のライブラリ） | インデックスなしで高速に走査できる |
 | ファイル監視 | notify（Rust） | ReadDirectoryChangesW を使う |
+| Git | PC にインストール済みの `git`（子プロセス） | ユーザーの設定・認証・フックがそのまま効く。ライブラリ（libgit2 など）は資格情報ヘルパーや署名との互換が不十分なので使わない |
+| 差分 | `git diff` の結果 ＋ CodeMirror の merge 拡張（@codemirror/merge） | 左右・行内の差分表示とハンク単位の操作 |
 | インストーラー | WiX（MSI）/ NSIS | Tauri の標準機能 |
 | 自動更新 | Tauri updater（署名つき） | オフライン時は何もしない |
 
@@ -31,18 +33,21 @@
 │   ├─ Watcher        ファイル変更の監視 → ファイル一覧と UI へ │
 │   ├─ Search         全文検索（その都度走査、結果を逐次通知）  │
 │   ├─ PtyManager     ConPTY でシェルを生成・入出力の中継       │
+│   ├─ GitService     git の実行・結果の解析（リポジトリごとに  │
+│   │                 1 つずつ順に実行）                        │
 │   └─ AiToolRegistry AI CLI の検出と起動コマンドの組み立て     │
 │                                                                │
 │        ▲ Tauri IPC（コマンド / イベント）                      │
 │        ▼                                                       │
 │  WebView2（UI）                                                │
-│   ├─ 左ペイン: FileTree / SearchView / Outline                 │
+│   ├─ 左ペイン: FileTree / SearchView / Outline / GitView       │
 │   └─ 右ペイン: Tabs → Editor (CodeMirror) / Preview (unified)  │
+│                        DiffView (CodeMirror merge)             │
 │                        Terminal (xterm.js)                     │
 └────────────────────────────────────────────────────────────────┘
           │ 子プロセス
           ▼
-   pwsh.exe / cmd.exe / bash.exe / wsl.exe
+   pwsh.exe / cmd.exe / bash.exe / wsl.exe / git.exe
           └─ claude / gemini / codex など
 ```
 
@@ -67,6 +72,7 @@ mark-shell.exe（Windows）                        WSL（Linux）
  │                                                  ├─ 探索・全文検索・置換
  │                                                  ├─ リンクの書き換え
  │                                                  ├─ 変更の監視（inotify）
+ │                                                  ├─ git の実行（WSL の git）
  │                                                  └─ ごみ箱（~/.local/share/Trash）
  └─ ConPTY ── wsl.exe -d <distro> --cd <Linux のパス> ─▶ シェル / claude など
 ```
@@ -102,7 +108,8 @@ mark-shell.exe（Windows）                        WSL（Linux）
 | --- | --- |
 | `%APPDATA%\mark-shell\config.json` | テーマ、フォント、ショートカット、ターミナルの設定 |
 | `%APPDATA%\mark-shell\ai-tools.json` | AI ツール定義（[terminal-ai.md](terminal-ai.md)） |
-| `%LOCALAPPDATA%\mark-shell\workspaces\<パスのハッシュ>.json` | ディレクトリごとの状態（開いていたタブ、フォルダの開閉、ペインの大きさ） |
+| `%LOCALAPPDATA%\mark-shell\workspaces\<パスのハッシュ>.json` | ディレクトリごとの状態（開いていたタブ、フォルダの開閉、ペインの大きさ、Git タブで選んだリポジトリ・セクションの開閉） |
+| `%LOCALAPPDATA%mark-shellgit<リポジトリのパスのハッシュ>.json` | 書きかけのコミットメッセージと直前のメッセージの履歴 |
 | `%LOCALAPPDATA%\mark-shell\recent.json` | 最近開いたディレクトリ |
 | `%LOCALAPPDATA%\mark-shell\recovery\` | 異常終了に備えた編集中の内容 |
 | `%LOCALAPPDATA%\mark-shell\logs\` | ログ（7 日分をローテーション）。ノートの本文はログに書かない |
@@ -125,5 +132,6 @@ mark-shell.exe（Windows）                        WSL（Linux）
 | --- | --- | --- |
 | 更新確認 | リリース配布元 | 起動時に 1 日 1 回（無効にできる） |
 | 外部画像の表示 | ファイル内の画像 URL | ユーザーが許可したときのみ |
+| Git のフェッチ・プル・プッシュ | リポジトリのリモート | ユーザーが実行したとき、および自動フェッチを有効にしたとき（既定で無効） |
 
 AI ツールやシェルから実行したコマンドの通信は、アプリではなくそれぞれのプロセスが行う。

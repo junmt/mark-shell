@@ -1,6 +1,7 @@
 //! mark-shell の Windows 版と WSL 用エージェントで共有する処理。
 //! Tauri に依存せず、Windows と Linux のどちらでもビルドできる
 
+pub mod git;
 pub mod i18n;
 pub mod links;
 pub mod paths;

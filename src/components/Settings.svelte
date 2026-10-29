@@ -219,6 +219,34 @@
       </section>
 
       <section>
+        <h3>Git</h3>
+        <label class="check"><input type="checkbox" bind:checked={draft.gitEnabled} /> {tr('Git 連携を使う', 'Enable Git integration', '启用 Git 集成')}</label>
+        <label>{tr('git の場所（空なら自動）', 'Path to git (empty for auto)', 'git 路径（留空则自动）')}
+          <input type="text" bind:value={draft.gitPath} placeholder="C:\Program Files\Git\cmd\git.exe" spellcheck="false" />
+        </label>
+        <label class="check"><input type="checkbox" bind:checked={draft.gitAutoFetch} /> {tr('自動でフェッチする（ウィンドウが前面にあるとき）', 'Fetch automatically (while the window is active)', '自动获取（窗口处于前台时）')}</label>
+        {#if draft.gitAutoFetch}
+          <label>{tr('間隔（分）', 'Interval (minutes)', '间隔（分钟）')}
+            <input type="number" min="1" max="120" bind:value={draft.gitAutoFetchMinutes} />
+          </label>
+        {/if}
+        <label>{tr('ステージ済みがないときのコミット', 'Commit with nothing staged', '没有已暂存内容时提交')}
+          <select bind:value={draft.gitCommitAll}>
+            <option value="ask">{tr('すべてステージするか確認する', 'Ask to stage all changes', '询问是否暂存全部')}</option>
+            <option value="always">{tr('確認せずにすべてステージする', 'Always stage all changes', '始终暂存全部')}</option>
+          </select>
+        </label>
+        <label>{tr('差分の表示', 'Diff view', '差异视图')}
+          <select bind:value={draft.gitDiffMode}>
+            <option value="split">{tr('左右', 'Side by side', '并排')}</option>
+            <option value="inline">{tr('行内', 'Inline', '内联')}</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" bind:checked={draft.gitGutter} /> {tr('エディタに変更の帯を出す', 'Show change bars in the editor', '在编辑器中显示更改标记')}</label>
+        <label class="check"><input type="checkbox" bind:checked={draft.gitTreeColors} /> {tr('ファイルツリーで変更のあるファイルに色を付ける', 'Color changed files in the file tree', '在文件树中为已更改的文件着色')}</label>
+      </section>
+
+      <section>
         <h3>{tr('ターミナル', 'Terminal', '终端')}</h3>
         <label>{tr('既定のシェル', 'Default shell', '默认 Shell')}
           <select bind:value={draft.terminal.defaultShell}>

@@ -32,11 +32,12 @@ import { resolveTheme } from './themes';
 import { i18n, resolveLocale, tr } from './i18n.svelte';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
+import { git, type GitTab } from './git.svelte';
 
 const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
 
 export type Mode = 'edit' | 'preview' | 'split';
-export type LeftView = 'files' | 'search' | 'outline';
+export type LeftView = 'files' | 'search' | 'outline' | 'git';
 
 export class Doc {
   path = $state('');
@@ -48,6 +49,12 @@ export class Doc {
   pinned = $state(false);
   mode = $state<Mode>('edit');
   deleted = $state(false);
+  /** 手動で選んだ色付けの言語（null なら拡張子などから自動）。Markdown 以外のファイルだけ */
+  language = $state<string | null>(null);
+  /** 実際に使っている言語の名前（色付けなしなら null） */
+  languageName = $state<string | null>(null);
+  /** Git のステージの内容（エディタの変更の帯の基準）。Git で管理されていなければ null */
+  gitBase = $state<string | null>(null);
   encoding = 'utf-8';
   eol: 'lf' | 'crlf' = 'lf';
   /** タブを切り替えても元に戻せるよう、エディタの状態をタブごとに持つ */
@@ -77,6 +84,8 @@ export class TermSession {
   ptyId = $state<number | null>(null);
   ai: boolean;
   request: Omit<SpawnRequest, 'cols' | 'rows'>;
+  /** 起動したらすぐ入力するコマンド（Git の操作を「ターミナルで実行」したとき） */
+  input: string | null = null;
   /** AI ツールなどがターミナルに付けたタイトル（会話の題名など。先頭の稼働表示の記号は除く） */
   osTitle = $state('');
   private titleBusy = $state(false);
@@ -141,6 +150,10 @@ class Store {
 
   // ---- タブ ----
   docs = $state<Doc[]>([]);
+  /** Git の差分などのタブ（ファイルのタブの後ろに並べる。キーは git: で始まる） */
+  views = $state<GitTab[]>([]);
+  /** 前回選んでいた Git のリポジトリ（ワークスペースの状態から） */
+  savedGitRepo: string | null = null;
   activePath = $state<string | null>(null);
   cursor = $state({ line: 1, col: 1 });
   view: EditorView | null = null;
@@ -185,7 +198,10 @@ class Store {
   dialog = $state<DialogRequest | null>(null);
   toasts = $state<Toast[]>([]);
   menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
-  palette = $state<'files' | 'commands' | 'folders' | null>(null);
+  /** branches: ブランチの切り替え、merge: マージするものを選ぶ */
+  palette = $state<'files' | 'commands' | 'folders' | 'branches' | 'merge' | 'language' | null>(null);
+  /** ファイルごとに手動で選んだ色付けの言語（ルートからの相対パス → 言語名）。ワークスペースの状態に保存する */
+  languageOverrides: Record<string, string> = {};
   settingsOpen = $state(false);
   conflict = $state<{ doc: Doc; disk: ReadResult } | null>(null);
   diff = $state<{ title: string; before: string; after: string } | null>(null);
@@ -197,6 +213,10 @@ class Store {
 
   get activeDoc(): Doc | null {
     return this.docs.find((d) => d.path === this.activePath) ?? null;
+  }
+
+  get activeView(): GitTab | null {
+    return this.views.find((v) => v.key === this.activePath) ?? null;
   }
 
   get tree(): TreeNode {
@@ -248,6 +268,8 @@ class Store {
       if (!this.adoptScanGen(e.payload.gen)) return;
       this.scanDoneGen = e.payload.gen;
       this.scanTruncated = e.payload.truncated;
+      // 探索の結果からルートの下のリポジトリ（.git）も探す
+      void git.detect();
       if (e.payload.truncated) {
         const n = e.payload.files.toLocaleString();
         this.toast(
@@ -262,6 +284,7 @@ class Store {
     });
     await listen<{ changes: Change[] }>('fs:change', (e) => this.onFsChange(e.payload.changes));
     await listen('fs:rescan', () => void this.rescan());
+    await git.init();
     await listen<{ id: number; hits: SearchHit[] }>('search:batch', (e) => {
       if (e.payload.id === this.searchId) this.searchHits.push(...e.payload.hits);
     });
@@ -437,16 +460,22 @@ class Store {
     this.aiChanged.clear();
     this.aiBefore.clear();
     this.docs = [];
+    this.views = [];
     this.activePath = null;
     this.searchHits = [];
+    git.saveDraftNow();
+    git.reset();
     this.treeVersion++;
 
     const ws = (await api.loadWorkspaceState(res.root)) as WorkspaceState | null;
+    this.savedGitRepo = null;
+    this.languageOverrides = { ...(ws?.languages ?? {}) };
     if (ws) {
       ws.expanded?.forEach((p) => this.expanded.add(p));
       this.leftWidth = ws.leftWidth ?? this.leftWidth;
       this.leftVisible = ws.leftVisible ?? true;
-      this.leftView = ws.leftView === 'search' || ws.leftView === 'outline' ? ws.leftView : 'files';
+      this.leftView = ws.leftView === 'search' || ws.leftView === 'outline' || ws.leftView === 'git' ? ws.leftView : 'files';
+      this.savedGitRepo = ws.gitRepo ?? null;
       this.terminalHeight = ws.terminalHeight ?? this.terminalHeight;
       this.terminalListHeight = ws.terminalListHeight ?? this.terminalListHeight;
       this.terminalVisible = ws.terminalVisible ?? false;
@@ -456,6 +485,8 @@ class Store {
       if (ws.active && this.docs.some((d) => d.path === ws.active)) this.activePath = ws.active;
     }
     await this.restoreRecovery();
+    // 前回選んでいたリポジトリに合わせる（探索が終わったときにも探し直す）
+    void git.detect();
   }
 
   async rescan() {
@@ -522,6 +553,8 @@ class Store {
       terminalHeight: this.terminalHeight,
       terminalListHeight: this.terminalListHeight,
       terminalVisible: this.terminalVisible,
+      gitRepo: git.repoPath,
+      languages: this.languageOverrides,
     };
   }
 
@@ -555,6 +588,7 @@ class Store {
       }
     }
     this.treeVersion++;
+    git.onFsChange([...touched]);
     for (const p of touched) {
       const lower = p.toLowerCase();
       for (const doc of this.docs) {
@@ -691,6 +725,7 @@ class Store {
       }
     }
     const doc = new Doc(path, r);
+    doc.language = this.languageOverrides[path] ?? null;
     doc.pinned = !!opts.pin;
     doc.mode = opts.mode ?? 'edit';
     // 仮タブ（固定していないタブ）は次に開くファイルで置き換える
@@ -702,7 +737,11 @@ class Store {
 
   activate(path: string, line?: number) {
     this.activePath = path;
+    if (path.startsWith('git:')) return;
     this.selected = path;
+    git.followActiveFile(path);
+    const doc = this.docs.find((d) => d.path === path);
+    if (doc) void git.updateBase(doc);
     this.revealInTree(path);
     if (line) {
       this.pendingReveal = { path, line };
@@ -720,6 +759,16 @@ class Store {
   }
 
   async closeTab(path: string) {
+    const view = this.views.find((v) => v.key === path);
+    if (view) {
+      const i = this.views.indexOf(view);
+      this.views.splice(i, 1);
+      if (this.activePath === path) {
+        const next = this.views[i] ?? this.views[i - 1];
+        this.activePath = next?.key ?? this.docs[this.docs.length - 1]?.path ?? null;
+      }
+      return;
+    }
     const doc = this.docs.find((d) => d.path === path);
     if (!doc) return;
     if (doc.dirty) {
@@ -744,16 +793,24 @@ class Store {
     this.docs.splice(i, 1);
     if (this.activePath === path) {
       const next = this.docs[i] ?? this.docs[i - 1];
-      this.activePath = next?.path ?? null;
+      this.activePath = next?.path ?? this.views[0]?.key ?? null;
     }
     this.saveWorkspaceState();
   }
 
   cycleTab(dir: 1 | -1) {
-    if (this.docs.length === 0) return;
-    const i = this.docs.findIndex((d) => d.path === this.activePath);
-    const next = this.docs[(i + dir + this.docs.length) % this.docs.length];
-    this.activate(next.path);
+    const keys = [...this.docs.map((d) => d.path), ...this.views.map((v) => v.key)];
+    if (keys.length === 0) return;
+    const i = keys.indexOf(this.activePath ?? '');
+    this.activate(keys[(i + dir + keys.length) % keys.length]);
+  }
+
+  /** 色付けの言語を手動で選ぶ（null で自動に戻す） */
+  setDocLanguage(doc: Doc, name: string | null) {
+    doc.language = name;
+    if (name) this.languageOverrides[doc.path] = name;
+    else delete this.languageOverrides[doc.path];
+    this.saveWorkspaceState();
   }
 
   cycleMode() {
@@ -1193,7 +1250,7 @@ class Store {
     return null;
   }
 
-  newTerminal(opts: { shellId?: string | null; toolId?: string; actionId?: string; cwd?: string | null; title?: string } = {}) {
+  newTerminal(opts: { shellId?: string | null; toolId?: string; actionId?: string; cwd?: string | null; title?: string; input?: string } = {}) {
     if (!this.root) {
       this.toast(tr('先にフォルダを開いてください', 'Open a folder first', '请先打开文件夹'), 'error');
       return;
@@ -1221,6 +1278,7 @@ class Store {
       },
       !!opts.toolId,
     );
+    s.input = opts.input ?? null;
     this.terminals.push(s);
     this.activeTerminal = s.key;
     this.terminalVisible = true;
@@ -1492,6 +1550,8 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
     if (scanKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(this.config[k])) && this.root) {
       await this.openRoot(this.root);
     }
+    const gitKeys: (keyof Config)[] = ['gitEnabled', 'gitPath', 'gitAutoFetch', 'gitAutoFetchMinutes', 'gitGutter', 'gitTreeColors'];
+    if (gitKeys.some((k) => before[k] !== this.config[k]) && this.root) void git.detect();
     this.treeVersion++;
   }
 
@@ -1590,6 +1650,11 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
         run: () => this.cycleMode(),
       },
       { id: 'terminal', label: tr('ターミナルの表示切り替え', 'Toggle terminal', '切换终端'), shortcut: 'Ctrl+`', run: () => this.toggleTerminal() },
+      {
+        id: 'language',
+        label: tr('言語モードの変更（色付けの言語を選ぶ）', 'Change language mode (syntax highlighting)', '更改语言模式（语法高亮）'),
+        run: () => doc && !this.isMarkdown(doc.path) && (this.palette = 'language'),
+      },
       { id: 'newTerminal', label: tr('新しいターミナル', 'New terminal', '新建终端'), run: () => this.newTerminal() },
       { id: 'rescan', label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), run: () => void this.rescan() },
       { id: 'reveal', label: tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
@@ -1607,6 +1672,31 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
       { id: 'update', label: tr('アップデートを確認', 'Check for updates', '检查更新'), run: () => void this.checkForUpdate(true) },
       { id: 'settings', label: tr('設定', 'Settings', '设置'), shortcut: 'Ctrl+,', run: () => (this.settingsOpen = true) },
     ];
+    if (git.repo) {
+      const g = (id: string, ja: string, en: string, zh: string, run: () => void, shortcut?: string) =>
+        list.push({ id: 'git:' + id, label: 'Git: ' + tr(ja, en, zh), run, shortcut });
+      g('show', 'Git を表示', 'Show Git', '显示 Git', () => this.showLeft('git'), 'Ctrl+Shift+G');
+      g('commit', 'コミット', 'Commit', '提交', () => void git.commit());
+      g('commitAmend', '修正コミット', 'Commit (amend)', '修改提交', () => void git.commit({ amend: true }));
+      g('commitPush', 'コミットしてプッシュ', 'Commit and push', '提交并推送', () => void git.commit({ push: true }));
+      g('stageAll', 'すべてステージ', 'Stage all changes', '暂存所有更改', () => void git.stageAll());
+      g('fetch', 'フェッチ', 'Fetch', '获取', () => void git.fetch());
+      g('pull', 'プル', 'Pull', '拉取', () => void git.pull());
+      g('push', 'プッシュ', 'Push', '推送', () => void git.push());
+      g('forcePush', '強制プッシュ（--force-with-lease）', 'Force push (--force-with-lease)', '强制推送（--force-with-lease）', () => void git.push(true));
+      g('switch', 'ブランチの切り替え', 'Switch branch', '切换分支', () => (this.palette = 'branches'));
+      g('merge', 'ブランチをマージ', 'Merge branch', '合并分支', () => (this.palette = 'merge'));
+      g('branch', 'ブランチの作成', 'Create branch', '创建分支', () => void git.createBranch());
+      g('stash', 'スタッシュ', 'Stash changes', '贮藏更改', () => void git.stashPush());
+      g('history', 'すべてのブランチの履歴', 'History of all branches', '所有分支的历史', () => void git.showHistory('all'));
+      g('refresh', '状態を読み直す', 'Refresh', '刷新', () => void git.refresh());
+      if (doc) {
+        g('fileHistory', 'このファイルの履歴', 'File history', '此文件的历史', () => void git.showFileHistory(doc.path));
+        g('fileDiff', 'このファイルの変更を表示', 'Show changes of this file', '显示此文件的更改', () => git.openWorkingDiff(doc.path));
+      }
+    } else if (git.info?.found) {
+      list.push({ id: 'git:init', label: 'Git: ' + tr('リポジトリを作成', 'Create repository', '创建仓库'), run: () => void git.initRepo() });
+    }
     for (const s of this.shells) {
       list.push({
         id: `shell:${s.id}`,
@@ -1647,6 +1737,8 @@ type WorkspaceState = {
   terminalHeight?: number;
   terminalListHeight?: number;
   terminalVisible?: boolean;
+  gitRepo?: string | null;
+  languages?: Record<string, string>;
 };
 
 export const store = new Store();

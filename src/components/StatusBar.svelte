@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
+  import { git } from '../lib/git.svelte';
 
   const doc = $derived(store.activeDoc);
   const chars = $derived(doc ? [...doc.text.replace(/\s/g, '')].length : 0);
@@ -24,6 +25,13 @@
       <span title={store.root}>{store.root}</span>
     {/if}
     {#if store.scanning}<span>{tr('読み込み中…', 'Loading…', '加载中…')}</span>{/if}
+    {#if git.repo && git.branch}
+      <button class="branch" onclick={() => (store.palette = 'branches')} title={tr('ブランチの切り替え', 'Switch branch', '切换分支')}>
+        ⎇ {git.branch.head ?? git.branch.oid?.slice(0, 7) ?? '—'}{#if git.repoState?.kind}*{/if}
+        {#if git.branch.ahead || git.branch.behind}<span>{#if git.branch.behind}↓{git.branch.behind}{/if}{#if git.branch.ahead} ↑{git.branch.ahead}{/if}</span>{/if}
+      </button>
+      {#if git.busy}<span>{git.busy}…</span>{/if}
+    {/if}
   {/if}
   {#if store.aiRunning}<span class="ai">✦ {tr('AI セッション実行中', 'AI session running', 'AI 会话运行中')}</span>{/if}
   <span class="spacer"></span>
@@ -41,6 +49,18 @@
     <span title={tr('空白を除いた文字数', 'Characters excluding whitespace', '不含空白的字符数')}
       >{tr(`${chars.toLocaleString()} 文字`, `${chars.toLocaleString()} chars`, `${chars.toLocaleString()} 字`)}</span
     >
+    {#if store.isMarkdown(doc.path)}
+      <span>Markdown</span>
+    {:else}
+      <button
+        class="branch"
+        onclick={() => (store.palette = 'language')}
+        title={doc.language
+          ? tr('手動で選んだ色付けの言語（クリックで変更）', 'Language chosen manually (click to change)', '手动选择的语言（点击更改）')
+          : tr('自動で選んだ色付けの言語（クリックで変更）', 'Language detected automatically (click to change)', '自动检测的语言（点击更改）')}
+        >{doc.languageName ?? tr('プレーンテキスト', 'Plain Text', '纯文本')}</button
+      >
+    {/if}
     <span>{encodingLabel(doc.encoding)}</span>
     <span>{doc.eol === 'crlf' ? 'CRLF' : 'LF'}</span>
     {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
@@ -70,6 +90,24 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .branch {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    padding: 0 4px;
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    gap: 6px;
+    flex: none;
+  }
+
+  .branch:hover {
+    background: var(--bg-hover);
+    color: var(--fg);
   }
 
   .ai,

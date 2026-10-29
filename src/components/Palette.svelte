@@ -4,6 +4,8 @@
   import { api } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
   import { basename, dirname } from '../lib/paths';
+  import { git } from '../lib/git.svelte';
+  import { detectLanguage, languageNames, PLAIN_TEXT } from '../lib/editor';
 
   type Item = {
     key: string;
@@ -81,6 +83,52 @@
           alt: { label: tr('新しいウィンドウで開く', 'Open in new window', '在新窗口中打开'), run: () => void api.openNewWindow(r) },
         }));
     }
+    // 色付けの言語を選ぶ（Markdown 以外のファイル）
+    if (store.palette === 'language') {
+      const doc = store.activeDoc;
+      if (!doc) return [];
+      const q = query.trim();
+      const auto = detectLanguage(doc.path, doc.text)?.name ?? tr('プレーンテキスト', 'Plain Text', '纯文本');
+      const current = doc.language;
+      const list: Item[] = [
+        { key: '__auto', label: tr('自動で選ぶ', 'Auto detect', '自动检测'), detail: auto + (current === null ? tr('（選択中）', ' (current)', '（当前）') : ''), run: () => store.setDocLanguage(doc, null) },
+        {
+          key: '__plain',
+          label: tr('プレーンテキスト（色付けしない）', 'Plain Text (no highlighting)', '纯文本（不高亮）'),
+          detail: current === PLAIN_TEXT ? tr('選択中', 'current', '当前') : '',
+          run: () => store.setDocLanguage(doc, PLAIN_TEXT),
+        },
+        ...languageNames().map((n) => ({ key: n, label: n, detail: current === n ? tr('選択中', 'current', '当前') : '', run: () => store.setDocLanguage(doc, n) })),
+      ];
+      return q ? list.map((it) => ({ it, s: score(it.label, q) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.it) : list;
+    }
+    // Git: ブランチの切り替え・マージするものを選ぶ
+    if (store.palette === 'branches' || store.palette === 'merge') {
+      const merge = store.palette === 'merge';
+      const q = query.trim();
+      const current = git.branch?.head;
+      const list: Item[] = git
+        .branchChoices()
+        .filter((c) => !(c.remote === null && c.name === current))
+        .map((c) => ({ c, s: score(c.name, q) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => (q ? b.s - a.s : 0))
+        .map(({ c }) => ({
+          key: c.name,
+          label: c.name,
+          detail: c.detail,
+          run: () =>
+            merge ? void git.merge(c.name) : c.remote ? void git.checkoutRemote(c.remote.remote, c.remote.name) : void git.checkout(c.name),
+        }));
+      if (merge) {
+        for (const t of git.refs?.tags ?? []) {
+          if (score(t.name, q) > 0) list.push({ key: 'tag:' + t.name, label: t.name, detail: tr('タグ', 'tag', '标签'), run: () => void git.merge(t.name) });
+        }
+      } else {
+        list.unshift({ key: '+new', label: tr('＋ 新しいブランチを作成…', '+ Create new branch…', '＋ 新建分支…'), run: () => void git.createBranch() });
+      }
+      return list;
+    }
     if (store.palette === 'commands') {
       return store
         .commands()
@@ -137,6 +185,9 @@
       files: tr('ファイルを開く', 'Open file', '打开文件'),
       commands: tr('コマンド', 'Commands', '命令'),
       folders: tr('最近開いたフォルダ', 'Recent folders', '最近打开的文件夹'),
+      branches: tr('ブランチの切り替え', 'Switch branch', '切换分支'),
+      merge: tr('マージするブランチ', 'Branch to merge', '要合并的分支'),
+      language: tr('言語モード', 'Language mode', '语言模式'),
     }[store.palette]}>
     <input
       bind:this={input}
@@ -146,6 +197,9 @@
         files: tr('ファイル名で検索', 'Search by file name', '按文件名搜索'),
         commands: tr('コマンドを検索', 'Search commands', '搜索命令'),
         folders: tr('最近開いたフォルダを名前で検索', 'Search recent folders by name', '按名称搜索最近打开的文件夹'),
+        language: tr('色付けに使う言語を検索', 'Search for a language to highlight with', '搜索用于高亮的语言'),
+        branches: tr('切り替えるブランチ（リモートのブランチも選べます）', 'Branch to switch to (remote branches too)', '要切换到的分支（也可选择远程分支）'),
+        merge: tr(`${git.branch?.head ?? 'HEAD'} にマージするブランチ・タグ`, `Branch or tag to merge into ${git.branch?.head ?? 'HEAD'}`, `要合并到 ${git.branch?.head ?? 'HEAD'} 的分支或标签`),
       }[store.palette]}
       spellcheck="false"
     />

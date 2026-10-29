@@ -2,6 +2,28 @@
   import { store, type Doc } from '../lib/store.svelte';
   import { basename, dirname } from '../lib/paths';
   import { tr } from '../lib/i18n.svelte';
+  import { git, type GitTab } from '../lib/git.svelte';
+
+  function viewMenu(e: MouseEvent, v: GitTab) {
+    store.openMenu(e, [
+      { label: tr('閉じる', 'Close', '关闭'), shortcut: 'Ctrl+W', action: () => void store.closeTab(v.key) },
+      {
+        label: tr('Git のタブをすべて閉じる', 'Close all Git tabs', '关闭所有 Git 标签页'),
+        action: () => {
+          for (const x of [...store.views]) void store.closeTab(x.key);
+        },
+      },
+    ]);
+  }
+
+  function gitItems(doc: Doc) {
+    if (!git.repoForRoot(doc.path)) return [];
+    return [
+      { label: '', separator: true },
+      { label: tr('変更を表示', 'Show changes', '显示更改'), action: () => git.openWorkingDiff(doc.path) },
+      { label: tr('このファイルの履歴', 'File history', '此文件的历史'), action: () => void git.showFileHistory(doc.path) },
+    ];
+  }
 
   function label(doc: Doc): string {
     const name = basename(doc.path);
@@ -28,6 +50,7 @@
       { label: '', separator: true },
       { label: tr('ツリーで表示', 'Reveal in tree', '在树中显示'), action: () => store.showLeft('files') },
       { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(doc.path, false) },
+      ...gitItems(doc),
     ]);
   }
 </script>
@@ -59,6 +82,35 @@
         }}
       >
         <span class="x">✕</span><span class="d">●</span>
+      </button>
+    </div>
+  {/each}
+  {#each store.views as v (v.key)}
+    <div
+      class="tab git"
+      class:active={v.key === store.activePath}
+      class:preview={!v.pinned}
+      role="tab"
+      tabindex="0"
+      aria-selected={v.key === store.activePath}
+      title={v.title}
+      onclick={() => store.activate(v.key)}
+      ondblclick={() => (v.pinned = true)}
+      onauxclick={(e) => e.button === 1 && void store.closeTab(v.key)}
+      onkeydown={(e) => e.key === 'Enter' && store.activate(v.key)}
+      oncontextmenu={(e) => viewMenu(e, v)}
+    >
+      <span class="kind">{v.kind === 'diff' ? '±' : v.kind === 'compare' ? '⇄' : '@'}</span>
+      <span class="name">{v.title}</span>
+      <button
+        class="close"
+        title={tr('閉じる', 'Close', '关闭')}
+        onclick={(e) => {
+          e.stopPropagation();
+          void store.closeTab(v.key);
+        }}
+      >
+        <span class="x">✕</span>
       </button>
     </div>
   {/each}
@@ -99,6 +151,12 @@
 
   .tab.preview .name {
     font-style: italic;
+  }
+
+  .kind {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
   }
 
   .name {

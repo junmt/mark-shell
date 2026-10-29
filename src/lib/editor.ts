@@ -32,6 +32,7 @@ import {
 import { tags as t } from '@lezer/highlight';
 import { basename, dirname, encodeLinkTarget, relative, stem } from './paths';
 import { tr } from './i18n.svelte';
+import { conflictMarkers, gitGutter } from './gitEditor';
 
 export const lineNumbersComp = new Compartment();
 export const wrapComp = new Compartment();
@@ -59,6 +60,10 @@ const highlightStyle = HighlightStyle.define([
   { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--code-function)' },
   { tag: [t.typeName, t.className, t.tagName], color: 'var(--code-type)' },
   { tag: [t.propertyName, t.attributeName], color: 'var(--code-property)' },
+  { tag: [t.self, t.special(t.variableName)], color: 'var(--code-keyword)' },
+  { tag: [t.escape, t.special(t.string)], color: 'var(--code-number)' },
+  { tag: [t.definition(t.function(t.variableName)), t.definition(t.typeName)], color: 'var(--code-function)' },
+  { tag: t.invalid, color: 'var(--code-keyword)', textDecoration: 'underline wavy' },
 ]);
 
 const baseTheme = EditorView.theme({
@@ -278,6 +283,8 @@ export type EditorHooks = {
   onPlainPaste: () => void;
   onContextMenu: (e: MouseEvent) => void;
   convertHtml: (html: string) => Promise<string | null>;
+  /** 変更の帯をクリックした（Git） */
+  onGitChunk?: (view: EditorView, pos: number, e: MouseEvent) => void;
 };
 
 function linkCompletion(hooks: EditorHooks) {
@@ -318,13 +325,46 @@ function looksLikeRichHtml(html: string): boolean {
 /** Markdown 以外のファイルの色付け。拡張子から言語を探し、読み込めたら差し替える（ログなど該当しないものは色なし） */
 export const languageComp = new Compartment();
 
-export function loadLanguageFor(view: EditorView, path: string) {
-  const desc = LanguageDescription.matchFilename(languages, basename(path));
-  if (!desc) return;
-  void desc.load().then((support) => {
-    if (!view.dom.isConnected) return;
-    view.dispatch({ effects: languageComp.reconfigure(support) });
-  });
+/** 言語の指定で「色付けしない」を表す名前 */
+export const PLAIN_TEXT = 'Plain Text';
+
+/** 選べる言語の名前（表示名順） */
+export function languageNames(): string[] {
+  return languages.map((l) => l.name).sort((a, b) => a.localeCompare(b));
+}
+
+/** ファイル名（拡張子）から言語を探す。見つからなければ先頭の行（#!/usr/bin/env python、<?php など）から */
+export function detectLanguage(path: string, text = ''): LanguageDescription | null {
+  const byName = LanguageDescription.matchFilename(languages, basename(path));
+  if (byName) return byName;
+  const first = text.slice(0, 200).split('\n')[0].trim();
+  const find = (name: string) => languages.find((l) => l.name === name) ?? null;
+  const shebang = /^#!.*?\b(?:env\s+)?([a-z]+)[\d.]*\s*$/i.exec(first);
+  if (shebang) {
+    const cmd = shebang[1].toLowerCase();
+    const map: Record<string, string> = { python: 'Python', node: 'JavaScript', bash: 'Shell', sh: 'Shell', zsh: 'Shell', ruby: 'Ruby', perl: 'Perl', php: 'PHP', pwsh: 'PowerShell', deno: 'TypeScript' };
+    if (map[cmd]) return find(map[cmd]);
+  }
+  if (first.startsWith('<?php')) return find('PHP');
+  if (first.startsWith('<?xml')) return find('XML');
+  if (/^<!doctype html|^<html/i.test(first)) return find('HTML');
+  return null;
+}
+
+/**
+ * Markdown 以外のファイルの色付け。override に言語名を渡すとその言語、PLAIN_TEXT なら色付けなし、
+ * null なら拡張子や先頭の行から自動で選ぶ。戻り値は使った言語の名前（色付けなしなら null）
+ */
+export async function loadLanguageFor(view: EditorView, path: string, override: string | null = null): Promise<string | null> {
+  const desc =
+    override === PLAIN_TEXT ? null : override ? (languages.find((l) => l.name === override) ?? null) : detectLanguage(path, view.state.sliceDoc(0, 200));
+  if (!desc) {
+    if (view.dom.isConnected) view.dispatch({ effects: languageComp.reconfigure([]) });
+    return null;
+  }
+  const support = await desc.load();
+  if (view.dom.isConnected) view.dispatch({ effects: languageComp.reconfigure(support) });
+  return desc.name;
 }
 
 /** Markdown 専用の機能（言語モード・リンク補完・書式のショートカット・HTML や画像の貼り付け） */
@@ -385,6 +425,8 @@ export function createExtensions(
 ): Extension[] {
   return [
     lineNumbersComp.of(opts.lineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+    gitGutter((view, pos, e) => hooks.onGitChunk?.(view, pos, e)),
+    conflictMarkers,
     wrapComp.of(opts.wrap ? EditorView.lineWrapping : []),
     readOnlyComp.of(EditorState.readOnly.of(opts.readOnly)),
     fontComp.of(fontTheme(opts.fontSize, opts.fontFamily)),
@@ -429,6 +471,26 @@ export function createExtensions(
         return true;
       },
     }),
+  ];
+}
+
+/** Git の差分やその時点の内容の表示に使う拡張（readOnly でなければ編集もできる） */
+export function viewerExtensions(opts: { markdown: boolean; wrap: boolean; readOnly: boolean; fontSize: number; fontFamily: string }): Extension[] {
+  return [
+    lineNumbers(),
+    opts.wrap ? EditorView.lineWrapping : [],
+    EditorState.readOnly.of(opts.readOnly),
+    fontTheme(opts.fontSize, opts.fontFamily),
+    highlightSpecialChars(),
+    drawSelection(),
+    history(),
+    opts.markdown ? markdown({ base: markdownLanguage, codeLanguages: languages }) : languageComp.of([]),
+    syntaxHighlighting(highlightStyle),
+    baseTheme,
+    EditorView.theme({ '.cm-content': { paddingBottom: '24px' } }),
+    EditorState.phrases.of({ '$ unchanged lines': tr('$ 行は同じ', '$ unchanged lines', '$ 行未更改') }),
+    search({ top: true }),
+    keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap]),
   ];
 }
 

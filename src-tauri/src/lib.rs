@@ -1,6 +1,7 @@
 mod ai_context;
 mod ai_tools;
 mod config;
+mod git;
 mod protocol;
 mod pty;
 mod search;
@@ -75,6 +76,23 @@ pub fn run() {
             ai_tools::launch_ide_tool,
             ai_tools::ai_tools_file_path,
             ai_context::set_ai_context,
+            git::git_repos,
+            git::git_status,
+            git::git_log,
+            git::git_commit_detail,
+            git::git_compare,
+            git::git_ls_tree,
+            git::git_cherry,
+            git::git_show_file,
+            git::git_refs,
+            git::git_stashes,
+            git::git_stash_files,
+            git::git_config_get,
+            git::git_op,
+            git::git_cancel,
+            git::git_watch,
+            git::git_load_state,
+            git::git_save_state,
         ])
         .build(tauri::generate_context!())
         .expect("mark-shell の起動に失敗しました")

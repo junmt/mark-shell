@@ -5,6 +5,7 @@
   import { basename, dirname, isImage, isInside, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
   import Icon, { type IconName } from './Icon.svelte';
+  import { git } from '../lib/git.svelte';
 
   /** フォルダ（開閉）・Markdown・画像・その他で描き分ける */
   function iconFor(node: TreeNode): IconName {
@@ -59,6 +60,24 @@
         { label: tr('相対パスをコピー', 'Copy relative path', '复制相对路径'), action: () => void store.copyPath(node.path, true) },
       );
       if (!node.dir) items.push({ label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'), action: () => void store.openFile(node.path, { pin: true }) });
+      if (git.repoForRoot(node.path)) {
+        const mark = git.marks.get(node.path);
+        items.push({ label: '', separator: true });
+        if (!node.dir) {
+          items.push(
+            { label: tr('変更を表示', 'Show changes', '显示更改'), disabled: !mark, action: () => git.openWorkingDiff(node.path) },
+            { label: tr('このファイルの履歴', 'File history', '此文件的历史'), disabled: mark === 'U', action: () => void git.showFileHistory(node.path) },
+          );
+        }
+        const f = git.status?.status.files.find((x) => git.rootPath(x.path) === node.path);
+        if (f) {
+          items.push(
+            { label: tr('ステージ', 'Stage', '暂存'), action: () => void git.stage([f]) },
+            { label: tr('変更を破棄', 'Discard changes', '放弃更改'), action: () => void git.discard([f]) },
+          );
+        }
+        items.push({ label: tr('.gitignore に追加', 'Add to .gitignore', '添加到 .gitignore'), action: () => void git.addToGitignore(node.path) });
+      }
     }
     items.push(
       { label: '', separator: true },
@@ -189,6 +208,7 @@
   <div class="spacer" style:height="{visible.total * ROW}px">
     {#each visible.items as row, i (row.node.path)}
       {@const node = row.node}
+      {@const gm = git.marks.get(node.path)}
       <div
         class="row"
         class:selected={store.selected === node.path}
@@ -212,7 +232,8 @@
           {#if node.dir}<Icon name={store.expanded.has(node.path) ? 'chevronDown' : 'chevronRight'} size={12} stroke={2} />{/if}
         </span>
         <span class="icon" class:dir={node.dir}><Icon name={iconFor(node)} size={15} /></span>
-        <span class="name">{node.name}</span>
+        <span class="name git-{gm === '!' ? 'x' : (gm ?? '')}">{node.name}</span>
+        {#if gm}<span class="gmark git-{gm === '!' ? 'x' : gm}">{gm}</span>{:else if node.dir && git.dirMarks.has(node.path)}<span class="gdot">●</span>{/if}
         {#if store.aiChanged.has(node.path)}<span class="badge" title={tr('AI セッション中に変更されました', 'Changed during an AI session', '在 AI 会话中被修改')}>AI</span>{/if}
         {#if store.docs.find((d) => d.path === node.path)?.dirty}<span class="dot">●</span>{/if}
       </div>
@@ -303,6 +324,39 @@
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
+  }
+
+  .name.git-M,
+  .gmark.git-M,
+  .name.git-R,
+  .gmark.git-R {
+    color: #d29922;
+  }
+
+  .name.git-A,
+  .gmark.git-A,
+  .name.git-U,
+  .gmark.git-U {
+    color: #2da44e;
+  }
+
+  .name.git-D,
+  .gmark.git-D,
+  .name.git-x,
+  .gmark.git-x {
+    color: #cf222e;
+  }
+
+  .gmark {
+    font-size: 11px;
+    font-weight: 700;
+    flex: none;
+  }
+
+  .gdot {
+    font-size: 8px;
+    color: #d29922;
+    flex: none;
   }
 
   .badge {

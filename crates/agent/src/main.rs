@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use markshell_core::paths::{normalize_rel, resolve, FilterConfig};
 use markshell_core::search::SearchOptions;
 use markshell_core::watch::WatchEvent;
-use markshell_core::{i18n, links, scan, search, tr, watch};
+use markshell_core::{git, i18n, links, scan, search, tr, watch};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -180,6 +180,30 @@ fn handle(agent: &Arc<Agent>, method: &str, params: &Value) -> Result<Value, Str
                 return Err(tr!("ルートディレクトリは削除できません", "The root directory cannot be deleted", "无法删除根目录"));
             }
             let p = resolve(&agent.root()?, &rel)?;
+            trash::delete(&p).map_err(|e| tr!("ごみ箱へ移動できません: {e}", "Cannot move to the trash: {e}", "无法移到回收站：{e}"))?;
+            Ok(json!({}))
+        }
+
+        // WSL の中の git を実行する（Git 連携）。進捗は git:progress で送る
+        "git" => {
+            let cwd: String = param(params, "cwd")?;
+            let args: Vec<String> = param(params, "args")?;
+            let stdin: Option<String> = param(params, "stdin")?;
+            let op: Option<u64> = param(params, "op")?;
+            let stdin = stdin.map(|s| git::from_b64(&s)).transpose()?;
+            let progress = |line: &str| emit("git:progress", json!({ "op": op, "line": line }));
+            let out = git::run(std::path::Path::new("git"), std::path::Path::new(&cwd), &args, stdin.as_deref(), op, &progress)?;
+            serde_json::to_value(out).map_err(|e| e.to_string())
+        }
+
+        "gitCancel" => {
+            git::cancel(param(params, "op")?);
+            Ok(json!({}))
+        }
+
+        // 未追跡のファイルの破棄（Git 連携）。ルートの外にあることもあるので絶対パスで受け取る
+        "trashAbs" => {
+            let p = PathBuf::from(param::<String>(params, "path")?);
             trash::delete(&p).map_err(|e| tr!("ごみ箱へ移動できません: {e}", "Cannot move to the trash: {e}", "无法移到回收站：{e}"))?;
             Ok(json!({}))
         }

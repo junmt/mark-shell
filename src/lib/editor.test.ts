@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayWidth, formatTableText, toggleTaskLine } from './editor';
+import { detectLanguage, displayWidth, formatTableText, languageNames, toggleTaskLine } from './editor';
 
 describe('toggleTaskLine', () => {
   it('チェックの切り替えとタスク化', () => {
@@ -24,5 +24,25 @@ describe('formatTableText', () => {
 
   it('表でなければ null', () => {
     expect(formatTableText(['a | b', 'c | d'])).toBeNull();
+  });
+});
+
+describe('detectLanguage', () => {
+  it('拡張子から選ぶ', () => {
+    expect(detectLanguage('src/a.ts')?.name).toBe('TypeScript');
+    expect(detectLanguage('index.php')?.name).toBe('PHP');
+    expect(detectLanguage('Dockerfile')?.name).toBe('Dockerfile');
+  });
+
+  it('拡張子がなければ先頭の行から選ぶ', () => {
+    expect(detectLanguage('bin/run', '#!/usr/bin/env python3\nprint(1)')?.name).toBe('Python');
+    expect(detectLanguage('script', '#!/bin/bash\necho hi')?.name).toBe('Shell');
+    expect(detectLanguage('page', '<?php echo 1;')?.name).toBe('PHP');
+    expect(detectLanguage('notes.log', 'hello')).toBeNull();
+  });
+
+  it('選べる言語の一覧に主な言語がある', () => {
+    const names = languageNames();
+    for (const n of ['TypeScript', 'PHP', 'Python', 'JSON', 'Markdown']) expect(names).toContain(n);
   });
 });

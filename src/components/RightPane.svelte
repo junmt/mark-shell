@@ -4,6 +4,7 @@
   import DocView from './DocView.svelte';
   import TerminalPanel from './TerminalPanel.svelte';
   import Splitter from './Splitter.svelte';
+  import GitView from './GitView.svelte';
   import { tr } from '../lib/i18n.svelte';
 
   let paneHeight = $state(600);
@@ -15,6 +16,10 @@
     {#if store.activeDoc}
       {#key store.activeDoc}
         <DocView doc={store.activeDoc} />
+      {/key}
+    {:else if store.activeView}
+      {#key store.activeView}
+        <GitView tab={store.activeView} />
       {/key}
     {:else}
       <div class="empty">

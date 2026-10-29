@@ -30,6 +30,21 @@ export type Config = {
   treeSort: 'name' | 'mtime';
   externalImages: 'click' | 'always';
   imageFolder: string;
+  /** Git 連携（docs/git.md） */
+  gitEnabled: boolean;
+  /** git の場所。空なら PATH から探す（Rust 側が読む） */
+  gitPath: string;
+  /** ウィンドウが前面にあるとき、gitAutoFetchMinutes 分ごとにフェッチする */
+  gitAutoFetch: boolean;
+  gitAutoFetchMinutes: number;
+  /** ステージ済みがないときのコミット: 'ask'（すべてステージするか確認）、'always'（確認せずすべてステージ） */
+  gitCommitAll: 'ask' | 'always';
+  /** 差分の表示: 'split'（左右）、'inline'（行内） */
+  gitDiffMode: 'split' | 'inline';
+  /** エディタの行番号の横に変更の帯を出す */
+  gitGutter: boolean;
+  /** ファイルツリーで変更のあるファイルに色と記号を付ける */
+  gitTreeColors: boolean;
   terminal: {
     defaultShell: string;
     cwd: 'root' | 'noteDir';
@@ -58,6 +73,14 @@ export const defaultConfig: Config = {
   treeSort: 'name',
   externalImages: 'click',
   imageFolder: 'assets',
+  gitEnabled: true,
+  gitPath: '',
+  gitAutoFetch: false,
+  gitAutoFetchMinutes: 5,
+  gitCommitAll: 'ask',
+  gitDiffMode: 'split',
+  gitGutter: true,
+  gitTreeColors: true,
   terminal: {
     defaultShell: '',
     cwd: 'root',
