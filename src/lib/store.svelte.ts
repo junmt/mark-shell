@@ -153,6 +153,8 @@ class Store {
   leftWidth = $state(260);
   terminalVisible = $state(false);
   terminalHeight = $state(260);
+  /** 左ペインの下側に並べるターミナル一覧の高さ */
+  terminalListHeight = $state(180);
 
   // ---- 設定 ----
   config = $state<Config>(structuredClone(defaultConfig));
@@ -446,6 +448,7 @@ class Store {
       this.leftVisible = ws.leftVisible ?? true;
       this.leftView = ws.leftView === 'search' || ws.leftView === 'outline' ? ws.leftView : 'files';
       this.terminalHeight = ws.terminalHeight ?? this.terminalHeight;
+      this.terminalListHeight = ws.terminalListHeight ?? this.terminalListHeight;
       this.terminalVisible = ws.terminalVisible ?? false;
       for (const t of ws.tabs ?? []) {
         await this.openFile(t.path, { pin: true, mode: t.mode, quiet: true });
@@ -517,6 +520,7 @@ class Store {
       leftVisible: this.leftVisible,
       leftView: this.leftView,
       terminalHeight: this.terminalHeight,
+      terminalListHeight: this.terminalListHeight,
       terminalVisible: this.terminalVisible,
     };
   }
@@ -1641,6 +1645,7 @@ type WorkspaceState = {
   leftVisible?: boolean;
   leftView?: LeftView;
   terminalHeight?: number;
+  terminalListHeight?: number;
   terminalVisible?: boolean;
 };
 

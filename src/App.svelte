@@ -16,6 +16,9 @@
   import DiffDialog from './components/DiffDialog.svelte';
   import Settings from './components/Settings.svelte';
   import Splitter from './components/Splitter.svelte';
+  import TerminalList from './components/TerminalList.svelte';
+
+  let leftHeight = $state(600);
 
   onMount(() => {
     void store.init();
@@ -119,8 +122,18 @@
   <div class="main">
     {#if store.root}
       {#if store.leftVisible}
-        <div class="left" style:width="{store.leftWidth}px">
-          <LeftPane />
+        <div class="left" style:width="{store.leftWidth}px" bind:clientHeight={leftHeight}>
+          <div class="left-main">
+            <LeftPane />
+          </div>
+          <Splitter
+            direction="horizontal"
+            onresize={(d) => (store.terminalListHeight = Math.min(Math.max(60, store.terminalListHeight - d), leftHeight - 120))}
+            ondone={() => store.saveWorkspaceState()}
+          />
+          <div class="left-terms" style:height="{store.terminalListHeight}px">
+            <TerminalList />
+          </div>
         </div>
         <Splitter
           direction="vertical"
@@ -174,6 +187,20 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  .left-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .left-terms {
+    flex: none;
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
   }
 
   .zoom-hint {
