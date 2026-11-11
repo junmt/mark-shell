@@ -19,7 +19,7 @@ npm install
 npm run tauri dev          # Start in development mode (UI changes reload instantly). Builds the WSL agent first
 ```
 
-A built executable can be started with a folder, e.g. `mark-shell.exe C:\Notes`.
+A built executable can be started with a folder, e.g. `mark-shell.exe C:\Notes`. The app also adds a `mark-shell` command to your user PATH (`%LOCALAPPDATA%\mark-shell\bin`), so you can run `mark-shell ~/notes` or `mark-shell .` from a WSL shell, cmd or PowerShell (open a new terminal after the first launch). It can be removed in Settings.
 
 ## Tests
 
@@ -78,5 +78,6 @@ The app does not create settings files inside the folders you open.
 | --- | --- |
 | `%APPDATA%\mark-shell\config.json` | Settings |
 | `%APPDATA%\mark-shell\ai-tools.json` | AI tool definitions (add your own tools here) |
+| `%LOCALAPPDATA%\mark-shell\bin\` | The `mark-shell` command (added to the user PATH) |
 | `%LOCALAPPDATA%\mark-shell\` | Per-folder state, recently opened folders, crash recovery data, Claude Code hook settings |
 | `~/.mark-shell/` (inside WSL) | The WSL agent, placed there the first time you open a WSL folder |

@@ -1,5 +1,6 @@
 mod ai_context;
 mod ai_tools;
+mod cli;
 mod config;
 mod git;
 mod protocol;
@@ -19,6 +20,11 @@ use state::AppState;
 /// `mark-shell.exe --ai-context`（Claude Code のフック）の処理
 pub fn print_ai_context() {
     ai_context::print_for_hook();
+}
+
+/// `mark-shell.exe --unregister-cli`（アンインストーラー）の処理
+pub fn unregister_cli() {
+    cli::unregister();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -44,6 +50,8 @@ pub fn run() {
             config::list_recovery,
             config::register_explorer_menu,
             config::is_explorer_menu_registered,
+            cli::register_cli,
+            cli::is_cli_registered,
             workspace::get_launch_target,
             workspace::open_root,
             workspace::rescan,

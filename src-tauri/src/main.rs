@@ -7,5 +7,10 @@ fn main() {
         mark_shell_lib::print_ai_context();
         return;
     }
+    // アンインストーラーから呼ばれたときは、コマンド mark-shell の登録（PATH）を外して終わる
+    if std::env::args().nth(1).as_deref() == Some("--unregister-cli") {
+        mark_shell_lib::unregister_cli();
+        return;
+    }
     mark_shell_lib::run()
 }
