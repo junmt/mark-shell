@@ -27,6 +27,8 @@ export type Config = {
   checkUpdates: boolean;
   /** エクスプローラーの右クリックメニュー「mark-shell で開く」を登録する（起動のたびに登録し直す） */
   explorerMenu: boolean;
+  /** コマンド mark-shell（WSL・cmd・PowerShell から起動する）を PATH に登録する（起動のたびに書き直す） */
+  cliCommand: boolean;
   treeSort: 'name' | 'mtime';
   externalImages: 'click' | 'always';
   imageFolder: string;
@@ -72,6 +74,7 @@ export const defaultConfig: Config = {
   followSymlinks: false,
   checkUpdates: true,
   explorerMenu: true,
+  cliCommand: true,
   treeSort: 'name',
   externalImages: 'click',
   imageFolder: 'assets',

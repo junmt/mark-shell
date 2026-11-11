@@ -66,6 +66,8 @@ export const api = {
   listRecovery: () => invoke<RecoveryEntry[]>('list_recovery'),
   registerExplorerMenu: (enable: boolean) => invoke<void>('register_explorer_menu', { enable }),
   isExplorerMenuRegistered: () => invoke<boolean>('is_explorer_menu_registered'),
+  registerCli: (enable: boolean) => invoke<void>('register_cli', { enable }),
+  isCliRegistered: () => invoke<boolean>('is_cli_registered'),
 
   getLaunchTarget: () => invoke<{ root: string; file: string | null } | null>('get_launch_target'),
   openRoot: (path: string) => invoke<OpenResult>('open_root', { path }),

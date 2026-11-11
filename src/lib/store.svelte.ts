@@ -327,6 +327,8 @@ class Store {
 
     // エクスプローラーの右クリックメニューを登録し直す（実行ファイルの場所と言語を最新にする）。開発中は登録しない
     if (this.config.explorerMenu && !import.meta.env.DEV) void api.registerExplorerMenu(true).catch(() => {});
+    // コマンド mark-shell（WSL などから起動する）のスクリプトを書き直し、PATH に登録する。開発中は登録しない
+    if (this.config.cliCommand && !import.meta.env.DEV) void api.registerCli(true).catch(() => {});
 
     // 起動の邪魔をしないよう少し待ってから確認する。開発中は確認しない
     if (this.config.checkUpdates && !import.meta.env.DEV) setTimeout(() => void this.checkForUpdate(false), 5000);

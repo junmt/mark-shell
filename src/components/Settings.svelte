@@ -31,6 +31,7 @@
   }
   let extText = $state('');
   let explorerMenu = $state(false);
+  let cliCommand = $state(false);
 
   // 開いたときだけ設定を写し取る（draft を読むと自分で書いた値に反応して繰り返してしまう）
   $effect(() => {
@@ -39,6 +40,7 @@
       draft = c;
       extText = c.markdownExtensions.join(', ');
       void api.isExplorerMenuRegistered().then((v) => (explorerMenu = v));
+      void api.isCliRegistered().then((v) => (cliCommand = v));
     } else {
       draft = null;
     }
@@ -68,6 +70,27 @@
               '已将“用 mark-shell 打开”添加到资源管理器右键菜单（文件夹和文件）',
             )
           : tr('右クリックメニューから外しました', 'Removed from the context menu', '已从右键菜单中移除'),
+      );
+    } catch (e) {
+      store.toast(errorMessage(e), 'error');
+    }
+  }
+
+  async function toggleCliCommand() {
+    try {
+      await api.registerCli(!cliCommand);
+      cliCommand = !cliCommand;
+      // 起動時の登録し直しもこの選択に従う
+      if (draft) draft.cliCommand = cliCommand;
+      await store.updateConfig({ cliCommand });
+      store.toast(
+        cliCommand
+          ? tr(
+              'コマンド mark-shell を PATH に追加しました。新しく開いた端末（WSL・PowerShell など）で「mark-shell フォルダ」のように使えます',
+              'Added the mark-shell command to PATH. In a newly opened terminal (WSL, PowerShell, etc.) run "mark-shell <folder>"',
+              '已将 mark-shell 命令添加到 PATH。在新打开的终端（WSL、PowerShell 等）中运行“mark-shell 文件夹”',
+            )
+          : tr('コマンド mark-shell を PATH から外しました', 'Removed the mark-shell command from PATH', '已从 PATH 中移除 mark-shell 命令'),
       );
     } catch (e) {
       store.toast(errorMessage(e), 'error');
@@ -291,6 +314,11 @@
             {explorerMenu
               ? tr('エクスプローラーの右クリックメニューから外す', 'Remove from Explorer context menu', '从资源管理器右键菜单中移除')
               : tr('エクスプローラーの右クリックメニューに追加', 'Add to Explorer context menu', '添加到资源管理器右键菜单')}
+          </button>
+          <button class="btn" onclick={toggleCliCommand}>
+            {cliCommand
+              ? tr('コマンド mark-shell を PATH から外す', 'Remove mark-shell command from PATH', '从 PATH 中移除 mark-shell 命令')
+              : tr('コマンド mark-shell を PATH に追加（WSL などから起動）', 'Add mark-shell command to PATH (launch from WSL, etc.)', '将 mark-shell 命令添加到 PATH（从 WSL 等启动）')}
           </button>
         </div>
       </section>
