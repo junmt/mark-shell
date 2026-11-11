@@ -157,7 +157,8 @@
   }
 
   .markdown-body {
-    max-width: 900px;
+    /* 文字の大きさに合わせて広がるよう em で指定する（16px のとき 900px） */
+    max-width: 56.25em;
     margin: 0 auto;
     padding: 24px 32px 40vh;
   }
