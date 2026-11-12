@@ -64,7 +64,6 @@ git push origin v0.2.0
 
 ## Not yet implemented
 
-- Splitting terminal tabs side by side or top and bottom
 - Exporting to HTML (you can make a PDF by printing to "Microsoft Print to PDF")
 - Showing the front matter `title` or the first heading as the name in the tree
 - Showing diffs of AI changes from Git history (currently the app compares open files with the content it remembers from before the change)

@@ -2,6 +2,7 @@
   import { store, type MenuItem, type TermSession } from '../lib/store.svelte';
   import Icon from './Icon.svelte';
   import { tr } from '../lib/i18n.svelte';
+  import { keysOf } from '../lib/termLayout';
 
   // 左ペインの下側に並べるターミナルの一覧（ターミナル本体は右ペインの下側）
 
@@ -27,6 +28,26 @@
     return [t.title, t.osTitle, status(t)].filter(Boolean).join(' — ');
   }
 
+  /** 分割したグループの中での位置（一覧で、同じグループのターミナルをつないで見せる） */
+  const groupPos = $derived.by(() => {
+    const pos = new Map<number, 'first' | 'middle' | 'last'>();
+    for (const l of store.termLayouts) {
+      const keys = keysOf(l);
+      if (keys.length < 2) continue;
+      keys.forEach((k, i) => pos.set(k, i === 0 ? 'first' : i === keys.length - 1 ? 'last' : 'middle'));
+    }
+    return pos;
+  });
+
+  function itemMenu(e: MouseEvent, t: TermSession) {
+    store.openMenu(e, [
+      { label: tr('左右に分割', 'Split right', '向右拆分'), shortcut: 'Ctrl+Shift+5', action: () => store.splitTerminal('row', t.key) },
+      { label: tr('上下に分割', 'Split down', '向下拆分'), action: () => store.splitTerminal('column', t.key) },
+      { label: '', separator: true },
+      { label: tr('閉じる', 'Close', '关闭'), action: () => store.closeTerminal(t.key) },
+    ]);
+  }
+
   function select(t: TermSession) {
     store.activeTerminal = t.key;
     if (!store.terminalVisible) {
@@ -41,6 +62,18 @@
     <span class="label">{tr('ターミナル', 'Terminals', '终端')}</span>
     <div class="spacer"></div>
     <button class="icon-btn" title={tr('新しいターミナル', 'New terminal', '新建终端')} onclick={() => store.newTerminal()}><Icon name="plus" size={14} /></button>
+    <button
+      class="icon-btn"
+      title={tr('ターミナルを左右に分割 (Ctrl+Shift+5)', 'Split terminal right (Ctrl+Shift+5)', '向右拆分终端 (Ctrl+Shift+5)')}
+      onclick={() => store.splitTerminal('row')}
+      disabled={store.terminals.length === 0}><Icon name="splitRight" size={14} /></button
+    >
+    <button
+      class="icon-btn"
+      title={tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端')}
+      onclick={() => store.splitTerminal('column')}
+      disabled={store.terminals.length === 0}><Icon name="splitDown" size={14} /></button
+    >
     <button class="icon-btn" title={tr('シェルや AI を選んで開く', 'Choose a shell or AI tool to open', '选择要打开的 Shell 或 AI')} onclick={newMenu}>
       <Icon name="chevronDown" size={12} stroke={2} />
     </button>
@@ -61,12 +94,16 @@
         class="item"
         class:active={store.activeTerminal === t.key}
         class:exited={t.exited}
+        class:grouped={groupPos.has(t.key)}
+        class:group-first={groupPos.get(t.key) === 'first'}
+        class:group-last={groupPos.get(t.key) === 'last'}
         role="tab"
         tabindex="0"
         aria-selected={store.activeTerminal === t.key}
         title={tooltip(t)}
         onclick={() => select(t)}
         onkeydown={(e) => e.key === 'Enter' && select(t)}
+        oncontextmenu={(e) => itemMenu(e, t)}
       >
         <!-- 状態: 処理中は点滅、待機中は小さな点、終了は輪 -->
         <span class="status" class:busy={t.busy} class:exited={t.exited} aria-label={status(t)}></span>
@@ -155,6 +192,32 @@
 
   .item.exited .text {
     opacity: 0.6;
+  }
+
+  /* 分割した同じグループのターミナルは、左の線でつなぐ */
+  .item.grouped {
+    position: relative;
+    margin-left: 6px;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
+  .item.grouped::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .item.group-first::before {
+    top: 4px;
+  }
+
+  .item.group-last::before {
+    bottom: 4px;
   }
 
   .kind {
