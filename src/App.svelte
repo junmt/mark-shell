@@ -119,6 +119,13 @@
       store.toggleTerminal();
       return;
     }
+    // Ctrl+Shift+5: ターミナルを左右に分割（VS Code と同じ）。ターミナルの中でも効く
+    if (mod && e.shiftKey && e.code === 'Digit5') {
+      e.preventDefault();
+      e.stopPropagation();
+      store.splitTerminal('row');
+      return;
+    }
     if (inTerminal(e) && (!(mod && e.shiftKey) || key === 'c' || key === 'v')) return;
     if (store.dialog || store.palette || git.form) return;
 

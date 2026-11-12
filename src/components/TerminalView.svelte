@@ -214,6 +214,9 @@
       { label: tr('すべて選択', 'Select all', '全选'), action: () => term.selectAll() },
       { label: tr('クリア', 'Clear', '清除'), action: () => term.clear() },
       { label: '', separator: true },
+      { label: tr('左右に分割', 'Split right', '向右拆分'), shortcut: 'Ctrl+Shift+5', action: () => store.splitTerminal('row', session.key) },
+      { label: tr('上下に分割', 'Split down', '向下拆分'), action: () => store.splitTerminal('column', session.key) },
+      { label: '', separator: true },
       { label: tr('このターミナルを閉じる', 'Close this terminal', '关闭此终端'), action: () => store.closeTerminal(session.key) },
     ]);
   }
@@ -229,6 +232,11 @@
 
   .term :global(.xterm) {
     height: 100%;
+  }
+
+  /* 行の下の余り（高さが行の倍数でないとき）に xterm.css の既定の黒が出ないよう、ターミナルの背景色にする */
+  .term :global(.xterm .xterm-viewport) {
+    background-color: var(--terminal-bg) !important;
   }
 
   /* 履歴があるときはスクロールバーを常に出す（xterm.js は普段 invisible にしている） */

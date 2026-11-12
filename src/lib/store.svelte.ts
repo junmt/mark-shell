@@ -33,6 +33,7 @@ import { VSCODE_SETTINGS, projectColorsFromText, type ProjectColors } from './vs
 import { i18n, resolveLocale, tr } from './i18n.svelte';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
+import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type TermLayout } from './termLayout';
 import { git, type GitTab } from './git.svelte';
 
 const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
@@ -190,6 +191,8 @@ class Store {
 
   // ---- ターミナルと AI ----
   terminals = $state<TermSession[]>([]);
+  /** ターミナルの並べ方。一覧の 1 項目（グループ）ごとに 1 つの木で、分割したターミナルは同じ木に入る */
+  termLayouts = $state<TermLayout[]>([]);
   activeTerminal = $state<number | null>(null);
   termSeq = 0;
   shells = $state<ShellInfo[]>([]);
@@ -1297,7 +1300,19 @@ class Store {
     return null;
   }
 
-  newTerminal(opts: { shellId?: string | null; toolId?: string; actionId?: string; cwd?: string | null; title?: string; input?: string } = {}) {
+  newTerminal(
+    opts: {
+      shellId?: string | null;
+      toolId?: string;
+      actionId?: string;
+      cwd?: string | null;
+      title?: string;
+      input?: string;
+      /** from（省略すれば選んでいるターミナル）を分けて、その右（row）か下（column）に開く */
+      split?: SplitDir;
+      from?: number;
+    } = {},
+  ) {
     if (!this.root) {
       this.toast(tr('先にフォルダを開いてください', 'Open a folder first', '请先打开文件夹'), 'error');
       return;
@@ -1307,7 +1322,11 @@ class Store {
     const selection = this.view && doc ? this.view.state.sliceDoc(this.view.state.selection.main.from, this.view.state.selection.main.to) : '';
     // WSL のフォルダでは、シェルを指定しなければそのディストリビューションのシェルで開く
     const wslShell = this.wsl ? this.shells.find((s) => s.id === `wsl:${this.wsl!.distro}`)?.id : undefined;
-    const shellId = opts.shellId ?? wslShell ?? (this.config.terminal.defaultShell || null);
+    // 分割するときは、元のターミナルと同じシェルで開く（AI ツールを分けたときは既定のシェル）
+    const fromKey = opts.split ? (opts.from ?? this.activeTerminal) : null;
+    const from = fromKey !== null ? this.terminals.find((t) => t.key === fromKey) : undefined;
+    const fromShell = from && !from.ai ? from.request.shellId : undefined;
+    const shellId = opts.shellId ?? fromShell ?? wslShell ?? (this.config.terminal.defaultShell || null);
     // シェル未指定なら Rust 側と同じく PowerShell 7 → Windows PowerShell の順で使われる
     const shell =
       this.shells.find((s) => s.id === shellId) ?? this.shells.find((s) => s.id === 'pwsh') ?? this.shells.find((s) => s.id === 'powershell');
@@ -1326,7 +1345,17 @@ class Store {
       !!opts.toolId,
     );
     s.input = opts.input ?? null;
-    this.terminals.push(s);
+    const group = from && opts.split ? this.termLayouts.findIndex((l) => contains(l, from.key)) : -1;
+    if (group >= 0 && opts.split && from) {
+      this.termLayouts[group] = splitAt(this.termLayouts[group], from.key, s.key, opts.split);
+      // 一覧では同じグループのターミナルを続けて並べる
+      const keys = keysOf(this.termLayouts[group]);
+      const last = Math.max(...this.terminals.map((t, i) => (keys.includes(t.key) ? i : -1)));
+      this.terminals.splice(last + 1, 0, s);
+    } else {
+      this.termLayouts.push(leaf(s.key));
+      this.terminals.push(s);
+    }
     this.activeTerminal = s.key;
     this.terminalVisible = true;
   }
@@ -1337,8 +1366,38 @@ class Store {
     const t = this.terminals[i];
     if (t.ptyId !== null && !t.exited) void api.ptyKill(t.ptyId);
     this.terminals.splice(i, 1);
-    if (this.activeTerminal === key) this.activeTerminal = this.terminals[i]?.key ?? this.terminals[i - 1]?.key ?? null;
+    // 分割の中のターミナルなら、残ったほうが広がる。選んでいたなら同じグループの別のターミナルを選ぶ
+    const group = this.termLayouts.findIndex((l) => contains(l, key));
+    const rest = group >= 0 ? remove(this.termLayouts[group], key) : null;
+    if (group >= 0) {
+      if (rest) this.termLayouts[group] = rest;
+      else this.termLayouts.splice(group, 1);
+    }
+    if (this.activeTerminal === key) {
+      this.activeTerminal = rest ? keysOf(rest)[0] : (this.terminals[i]?.key ?? this.terminals[i - 1]?.key ?? null);
+    }
     if (this.terminals.length === 0) this.terminalVisible = false;
+  }
+
+  /** 選んでいるターミナル（なければ新しく開く）を分けて、右か下に新しいターミナルを開く */
+  splitTerminal(dir: SplitDir, from?: number) {
+    const key = from ?? this.activeTerminal;
+    if (key === null || !this.terminals.some((t) => t.key === key)) {
+      this.newTerminal();
+      return;
+    }
+    this.newTerminal({ split: dir, from: key });
+  }
+
+  /** ターミナルのグループ（key を含む木） */
+  termGroupOf(key: number | null): TermLayout | null {
+    return key === null ? null : (this.termLayouts.find((l) => contains(l, key)) ?? null);
+  }
+
+  /** 分割の境界を動かした */
+  setTermRatio(group: number, path: ('a' | 'b')[], ratio: number) {
+    const l = this.termLayouts[group];
+    if (l) this.termLayouts[group] = setRatio(l, path, ratio);
   }
 
   toggleTerminal() {
@@ -1703,6 +1762,13 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
         run: () => doc && !this.isMarkdown(doc.path) && (this.palette = 'language'),
       },
       { id: 'newTerminal', label: tr('新しいターミナル', 'New terminal', '新建终端'), run: () => this.newTerminal() },
+      {
+        id: 'splitTerminalRight',
+        label: tr('ターミナルを左右に分割', 'Split terminal right', '向右拆分终端'),
+        shortcut: 'Ctrl+Shift+5',
+        run: () => this.splitTerminal('row'),
+      },
+      { id: 'splitTerminalDown', label: tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端'), run: () => this.splitTerminal('column') },
       { id: 'rescan', label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), run: () => void this.rescan() },
       { id: 'reveal', label: tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
       { id: 'print', label: tr('印刷 / PDF に保存', 'Print / Save as PDF', '打印 / 保存为 PDF'), run: () => void this.print() },
