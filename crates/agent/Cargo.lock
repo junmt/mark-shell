@@ -372,6 +372,7 @@ dependencies = [
  "grep-regex",
  "grep-searcher",
  "ignore",
+ "inotify",
  "notify",
  "percent-encoding",
  "regex",

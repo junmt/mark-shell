@@ -1,16 +1,26 @@
 //! ルートディレクトリ以下の変更の監視。少しの間に起きた変更をまとめて渡す
+//!
+//! Windows では notify（ReadDirectoryChangesW）を使う。Linux（WSL のエージェント）では inotify を直接使う
+//! （[`watch_inotify.rs`](self)）。notify 8 は inotify の監視に OPEN を含めるので、大きなフォルダを探索すると
+//! フォルダを開いたイベントでキューが溢れ、探索のやり直しが止まらなくなるため。
 
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use notify::event::{EventKind, ModifyKind, RenameMode};
-use notify::{RecursiveMode, Watcher as _};
 use serde::{Deserialize, Serialize};
 
 use crate::paths::{mtime_ms, to_rel, FilterConfig};
 use crate::scan::{scan, Entry};
+
+#[cfg(not(target_os = "linux"))]
+pub use notify_watch::{start, Watcher};
+
+#[cfg(target_os = "linux")]
+#[path = "watch_inotify.rs"]
+mod inotify_watch;
+#[cfg(target_os = "linux")]
+pub use inotify_watch::{start, Watcher};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -19,9 +29,6 @@ pub enum Change {
     Modify(Entry),
     Remove { path: String },
 }
-
-/// 監視のハンドル。drop すると監視が止まる
-pub type Watcher = notify::RecommendedWatcher;
 
 pub enum WatchEvent {
     Changes(Vec<Change>),
@@ -32,49 +39,105 @@ pub enum WatchEvent {
 /// 変更をまとめて送るまでの待ち時間
 const COALESCE: Duration = Duration::from_millis(120);
 
-/// 監視を始める。戻り値を drop すると止まる
-pub fn start(
-    root: PathBuf,
-    filter: Arc<FilterConfig>,
-    on_event: impl Fn(WatchEvent) + Send + 'static,
-) -> notify::Result<Watcher> {
-    let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
-    let mut watcher = notify::recommended_watcher(move |res| {
-        let _ = tx.send(res);
-    })?;
-    watcher.watch(&root, RecursiveMode::Recursive)?;
+#[cfg(not(target_os = "linux"))]
+mod notify_watch {
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::sync::Arc;
 
-    std::thread::spawn(move || loop {
-        // 最初のイベントを待ち、少しの間に来たものをまとめる
-        let first = match rx.recv() {
-            Ok(e) => e,
-            Err(_) => return, // 監視が止まった
-        };
-        let mut events = vec![first];
-        loop {
-            match rx.recv_timeout(COALESCE) {
-                Ok(e) => events.push(e),
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => break,
+    use notify::event::{EventKind, ModifyKind, RenameMode};
+    use notify::{RecursiveMode, Watcher as _};
+
+    use super::{modified, present, removed, Change, WatchEvent, COALESCE};
+    use crate::paths::FilterConfig;
+
+    /// 監視のハンドル。drop すると監視が止まる
+    pub type Watcher = notify::RecommendedWatcher;
+
+    /// 監視を始める。戻り値を drop すると止まる
+    pub fn start(
+        root: PathBuf,
+        filter: Arc<FilterConfig>,
+        on_event: impl Fn(WatchEvent) + Send + 'static,
+    ) -> notify::Result<Watcher> {
+        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let mut watcher = notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        })?;
+        watcher.watch(&root, RecursiveMode::Recursive)?;
+
+        std::thread::spawn(move || loop {
+            // 最初のイベントを待ち、少しの間に来たものをまとめる
+            let first = match rx.recv() {
+                Ok(e) => e,
+                Err(_) => return, // 監視が止まった
+            };
+            let mut events = vec![first];
+            loop {
+                match rx.recv_timeout(COALESCE) {
+                    Ok(e) => events.push(e),
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
             }
-        }
-        let mut changes = Vec::new();
-        let mut rescan = false;
-        for ev in events {
-            match ev {
-                Ok(ev) if ev.need_rescan() => rescan = true,
-                Ok(ev) => collect(&root, &filter, &ev, &mut changes),
-                Err(_) => rescan = true,
+            let mut changes = Vec::new();
+            let mut rescan = false;
+            for ev in events {
+                match ev {
+                    Ok(ev) if ev.need_rescan() => rescan = true,
+                    Ok(ev) => collect(&root, &filter, &ev, &mut changes),
+                    Err(_) => rescan = true,
+                }
             }
+            if rescan {
+                on_event(WatchEvent::Rescan);
+            }
+            if !changes.is_empty() {
+                on_event(WatchEvent::Changes(changes));
+            }
+        });
+        Ok(watcher)
+    }
+
+    fn collect(root: &Path, filter: &Arc<FilterConfig>, ev: &notify::Event, out: &mut Vec<Change>) {
+        match ev.kind {
+            EventKind::Create(_) => {
+                for p in &ev.paths {
+                    present(root, filter, p, out);
+                }
+            }
+            EventKind::Remove(_) => {
+                for p in &ev.paths {
+                    removed(root, p, out);
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(mode)) => match mode {
+                RenameMode::From => ev.paths.iter().for_each(|p| removed(root, p, out)),
+                RenameMode::To => ev.paths.iter().for_each(|p| present(root, filter, p, out)),
+                RenameMode::Both if ev.paths.len() == 2 => {
+                    removed(root, &ev.paths[0], out);
+                    present(root, filter, &ev.paths[1], out);
+                }
+                _ => {
+                    for p in &ev.paths {
+                        if p.exists() {
+                            present(root, filter, p, out);
+                        } else {
+                            removed(root, p, out);
+                        }
+                    }
+                }
+            },
+            EventKind::Modify(_) => {
+                for p in &ev.paths {
+                    if let Some(c) = modified(root, p) {
+                        out.push(c);
+                    }
+                }
+            }
+            _ => {}
         }
-        if rescan {
-            on_event(WatchEvent::Rescan);
-        }
-        if !changes.is_empty() {
-            on_event(WatchEvent::Changes(changes));
-        }
-    });
-    Ok(watcher)
+    }
 }
 
 fn entry_for(root: &Path, path: &Path) -> Option<(Entry, bool)> {
@@ -108,44 +171,10 @@ fn removed(root: &Path, path: &Path, out: &mut Vec<Change>) {
     }
 }
 
-fn collect(root: &Path, filter: &Arc<FilterConfig>, ev: &notify::Event, out: &mut Vec<Change>) {
-    match ev.kind {
-        EventKind::Create(_) => {
-            for p in &ev.paths {
-                present(root, filter, p, out);
-            }
-        }
-        EventKind::Remove(_) => {
-            for p in &ev.paths {
-                removed(root, p, out);
-            }
-        }
-        EventKind::Modify(ModifyKind::Name(mode)) => match mode {
-            RenameMode::From => ev.paths.iter().for_each(|p| removed(root, p, out)),
-            RenameMode::To => ev.paths.iter().for_each(|p| present(root, filter, p, out)),
-            RenameMode::Both if ev.paths.len() == 2 => {
-                removed(root, &ev.paths[0], out);
-                present(root, filter, &ev.paths[1], out);
-            }
-            _ => {
-                for p in &ev.paths {
-                    if p.exists() {
-                        present(root, filter, p, out);
-                    } else {
-                        removed(root, p, out);
-                    }
-                }
-            }
-        },
-        EventKind::Modify(_) => {
-            for p in &ev.paths {
-                if let Some((entry, false)) = entry_for(root, p) {
-                    if !entry.path.is_empty() {
-                        out.push(Change::Modify(entry));
-                    }
-                }
-            }
-        }
-        _ => {}
+/// 中身が変わったファイル（フォルダは扱わない）
+fn modified(root: &Path, path: &Path) -> Option<Change> {
+    match entry_for(root, path) {
+        Some((entry, false)) if !entry.path.is_empty() => Some(Change::Modify(entry)),
+        _ => None,
     }
 }
