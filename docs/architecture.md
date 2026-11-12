@@ -14,7 +14,7 @@
 | ターミナル | xterm.js（UI）＋ portable-pty（Rust、ConPTY） | Windows ネイティブの疑似端末で PowerShell や CLI ツールが正しく動く |
 | ディレクトリ探索 | ignore（Rust、ripgrep のライブラリ） | 並列での再帰探索 |
 | 全文検索 | grep-searcher / grep-regex（Rust、ripgrep のライブラリ） | インデックスなしで高速に走査できる |
-| ファイル監視 | notify（Rust） | ReadDirectoryChangesW を使う |
+| ファイル監視 | notify（Rust） | ReadDirectoryChangesW を使う。WSL のエージェントは inotify を直接使う |
 | Git | PC にインストール済みの `git`（子プロセス） | ユーザーの設定・認証・フックがそのまま効く。ライブラリ（libgit2 など）は資格情報ヘルパーや署名との互換が不十分なので使わない |
 | 差分 | `git diff` の結果 ＋ CodeMirror の merge 拡張（@codemirror/merge） | 左右・行内の差分表示とハンク単位の操作 |
 | インストーラー | WiX（MSI）/ NSIS | Tauri の標準機能 |
@@ -80,6 +80,7 @@ mark-shell.exe（Windows）                        WSL（Linux）
 - 理由: Windows から `\\wsl.localhost` 経由ではフォルダ全体をたどる処理が遅く、変更の通知（ReadDirectoryChangesW）が届かない。Windows のごみ箱も使えない。
 - 処理の本体は `crates/core` にあり、Windows 版とエージェントで同じコードを使う。エージェント（`crates/agent`）は Windows 上で Linux 向け（`x86_64-unknown-linux-musl`、静的リンク、`rust-lld`）にビルドし、アプリに埋め込む（`src-tauri/build.rs`）。WSL 側に追加のインストールは要らない。
 - 初回に `wsl.exe` の標準入力でエージェントを `~/.mark-shell/agent-<中身のハッシュ>` に置く。版が変わると名前が変わるので置き直し、古いものは消す。
+- エージェントの変更の監視は、notify を使わず inotify を直接使う（`crates/core/src/watch_inotify.rs`）。notify 8 は inotify の監視に OPEN を含めるので、フォルダの多い場所を探索すると、フォルダを開いたイベントでカーネルのキュー（既定 16,384 件）が溢れる。溢れると「探索し直す」になり、その探索でまた溢れるので、探索が終わらなくなる。そこで作成・削除・変更・移動のイベントだけを監視する。
 - エージェントとは 1 行 1 つの JSON でやり取りする。探索・検索・監視の結果は、画面側が Windows のフォルダで受け取るイベント（`scan:batch`、`fs:change` など）と同じ名前・同じ形で送るので、画面側は区別しない。
 - エージェントはウィンドウ（プロセス）とディストリビューションごとに 1 つ。アプリが終わると標準入力が閉じ、エージェントも終わる。
 - ターミナルの既定のシェルはそのディストリビューションのシェルになり、開いているフォルダの Linux のパスで始まる。CLI の AI ツールは WSL の中でログインシェル（`sh -lc`）から起動するので、`~/.local/bin` などの PATH が通る。
