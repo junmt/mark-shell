@@ -318,10 +318,13 @@ class Store {
     void this.refreshAiTools();
 
     // 起動時に指定がなければ、前回開いていたフォルダを開く（なくなっていればようこそ画面）。
+    // 複数のウィンドウを同時に閉じていたら、それらをすべて開き直す（2 つ目からは新しいウィンドウで）。
     // エクスプローラーの右クリックからファイルを指定されたら、そのフォルダを開いてファイルを表示する
     const launch = await api.getLaunchTarget();
+    const restore = launch ? [] : await api.takeRestoreWindows().catch(() => [] as string[]);
+    for (const p of restore.slice(1)) void api.openNewWindow(p).catch(() => {});
     this.recent = await api.getRecent();
-    const target = launch?.root ?? this.recent[0];
+    const target = launch?.root ?? restore[0] ?? this.recent[0];
     if (target) await this.openRoot(target);
     if (launch?.file && this.root) await this.openFile(launch.file, { pin: true });
 

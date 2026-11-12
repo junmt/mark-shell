@@ -6,6 +6,7 @@ mod git;
 mod protocol;
 mod pty;
 mod search;
+mod session;
 mod shells;
 mod state;
 mod watcher;
@@ -73,6 +74,7 @@ pub fn run() {
             workspace::open_new_window,
             workspace::is_installed,
             workspace::open_with_default_app,
+            session::take_restore_windows,
             search::search_start,
             search::search_cancel,
             search::replace_in_files,
@@ -107,6 +109,7 @@ pub fn run() {
         .expect("mark-shell の起動に失敗しました")
         .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
+                session::mark_closed();
                 ai_context::remove_context_file();
             }
         });

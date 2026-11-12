@@ -127,6 +127,7 @@ fn open_root_blocking(app: &AppHandle, path: &str) -> Result<OpenResult, String>
 
     let root_str = p.to_string_lossy().into_owned();
     config::push_recent(&root_str);
+    crate::session::register(&root_str);
     let name = p
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

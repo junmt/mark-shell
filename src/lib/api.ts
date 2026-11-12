@@ -91,6 +91,7 @@ export const api = {
   revealInExplorer: (path: string) => invoke<void>('reveal_in_explorer', { path }),
   absolutePath: (path: string) => invoke<string>('absolute_path', { path }),
   openNewWindow: (path?: string) => invoke<void>('open_new_window', { path }),
+  takeRestoreWindows: () => invoke<string[]>('take_restore_windows'),
   isInstalled: () => invoke<boolean>('is_installed'),
   setLocale: (locale: string) => invoke<void>('set_locale', { locale }),
   openWithDefaultApp: (path: string) => invoke<void>('open_with_default_app', { path }),
