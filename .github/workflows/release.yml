@@ -1,4 +1,4 @@
-# v で始まるタグ（v0.2.0 など）を push すると、テストしてから Windows 用のインストーラーを作り、
+# v で始まるタグ（v0.2.0 など）を push すると、テストしてから Windows 用のインストーラーと Mac 用の .dmg を作り、
 # GitHub の Releases に公開する。アプリのバージョンはタグから取る
 name: release
 
@@ -82,3 +82,56 @@ jobs:
           $portable = "mark-shell_${version}_x64-portable.exe"
           Copy-Item src-tauri/target/release/mark-shell.exe $portable
           gh release upload '${{ github.ref_name }}' $portable --clobber
+
+  # Mac 版（Apple Silicon と Intel の両方で動く .dmg と、自動アップデート用の .app.tar.gz）。
+  # Windows 版のあとに同じリリースへ追加し、latest.json にも Mac の分を足す。Apple の署名はしていない
+  release-macos:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            crates/core
+
+      - name: タグからバージョンを設定する
+        run: |
+          version='${{ github.ref_name }}'
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.version = process.argv[1].replace(/^v/, "");
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+          ' "$version"
+
+      - run: npm ci
+
+      - name: テスト
+        run: |
+          (cd crates/core && cargo test)
+          (cd src-tauri && cargo test)
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: mark-shell ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: --target universal-apple-darwin

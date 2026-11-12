@@ -1,6 +1,6 @@
 # mark-shell
 
-A Windows app that lists the files in a folder in a tree on the left and lets you edit Markdown and other text files on the right, with a live preview for Markdown. A built-in terminal launches AI tools such as Claude Code, which are told which file you have open. Folders inside WSL are supported: like VS Code's WSL extension, the terminal and AI tools then run inside WSL. The specifications are in [docs/](docs/README.md) (in Japanese).
+A Windows app (with an experimental macOS build) that lists the files in a folder in a tree on the left and lets you edit Markdown and other text files on the right, with a live preview for Markdown. A built-in terminal launches AI tools such as Claude Code, which are told which file you have open. Folders inside WSL are supported: like VS Code's WSL extension, the terminal and AI tools then run inside WSL. The specifications are in [docs/](docs/README.md) (in Japanese).
 
 ## Requirements
 
@@ -9,6 +9,12 @@ A Windows app that lists the files in a folder in a tree on the left and lets yo
 - [Rust](https://www.rust-lang.org/) (stable, via `rustup`) and the Linux target used to build the WSL agent (`rustup target add x86_64-unknown-linux-musl`)
 - Visual Studio "Desktop development with C++" (MSVC and the Windows SDK)
 - WebView2 Runtime (included with Windows 11)
+
+### macOS (experimental)
+
+The macOS build is made on GitHub Actions (`.github/workflows/macos.yml`), which runs the tests and builds a universal `.dmg` (Apple Silicon and Intel) on every pull request and push to `main`; download it from the run's Artifacts. To build on a Mac yourself you need Xcode Command Line Tools, Node.js and Rust; then run `npm install` and `npm run tauri build`. Platform-specific settings are in `src-tauri/tauri.windows.conf.json` and `src-tauri/tauri.macos.conf.json`.
+
+On macOS, shortcuts use Cmd instead of Ctrl, except Ctrl+` (terminal), Ctrl+Shift+5 (split terminal) and Ctrl+Tab. WSL, the Explorer context menu and the `mark-shell` command are Windows only. The app is not signed with an Apple Developer ID, so on first launch right-click the app and choose Open (or run `xattr -dr com.apple.quarantine /Applications/mark-shell.app`).
 
 Keep the project on a local disk, not in a synced folder such as Google Drive. `npm install` fails in synced folders.
 
@@ -36,7 +42,7 @@ cd src-tauri; cargo test   # App (AI tool definitions, context, WSL paths)
 npm run tauri build        # Creates the MSI and NSIS installers in src-tauri/target/release/bundle/
 ```
 
-Pushing a tag of the form `v1.2.3` to GitHub makes GitHub Actions (`.github/workflows/release.yml`) run the tests, build the installers (`-setup.exe` and `.msi`) and a standalone executable (`-portable.exe`), and publish them on Releases. The app version is taken from the tag. The release also includes signed update files and `latest.json`, which installed copies use to update themselves.
+Pushing a tag of the form `v1.2.3` to GitHub makes GitHub Actions (`.github/workflows/release.yml`) run the tests, build the installers (`-setup.exe` and `.msi`) and a standalone executable (`-portable.exe`), and publish them on Releases, then build the macOS `.dmg` and add it to the same release. The app version is taken from the tag. The release also includes signed update files and `latest.json`, which installed copies use to update themselves.
 
 ```powershell
 git tag v0.2.0

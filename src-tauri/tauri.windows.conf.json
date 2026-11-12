@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "npm run agent && npm run dev",
+    "beforeBuildCommand": "npm run agent && npm run build"
+  },
+  "bundle": {
+    "targets": ["nsis", "msi"]
+  }
+}

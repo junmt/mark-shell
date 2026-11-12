@@ -6,6 +6,7 @@
   import { basename, dirname } from '../lib/paths';
   import { git } from '../lib/git.svelte';
   import { detectLanguage, languageNames, PLAIN_TEXT } from '../lib/editor';
+  import { keyLabel } from '../lib/platform';
 
   type Item = {
     key: string;
@@ -214,7 +215,7 @@
         >
           <span class="label">{item.label}</span>
           {#if item.detail}<span class="detail">{item.detail}</span>{/if}
-          {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
+          {#if item.shortcut}<span class="shortcut">{keyLabel(item.shortcut)}</span>{/if}
         </button>
       {:else}
         <div class="none">{tr('見つかりません', 'No results', '未找到')}</div>

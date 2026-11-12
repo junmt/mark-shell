@@ -7,6 +7,7 @@
   import { tr } from '../lib/i18n.svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import Icon from './Icon.svelte';
+  import { isMod } from '../lib/platform';
 
   // 2 つのブランチ・コミットの比較（取り込むコミット・送るコミット・変わったファイル）
   let { tab: tabProp }: { tab: GitTab } = $props();
@@ -40,7 +41,7 @@
   });
 
   function select(h: string, e: MouseEvent) {
-    if (e.ctrlKey) selected = selected.includes(h) ? selected.filter((x) => x !== h) : [...selected, h];
+    if (isMod(e)) selected = selected.includes(h) ? selected.filter((x) => x !== h) : [...selected, h];
     else selected = [h];
   }
 

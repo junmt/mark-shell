@@ -1,0 +1,49 @@
+# Mac 版がビルドできるかを確かめる（手元に Mac がなくても、プルリクエストや main への push のたびに確認できる）。
+# テストのあと Apple Silicon と Intel の両方で動く .app / .dmg を作り、Actions の Artifacts に置く（Apple の署名なし）
+name: macos
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            crates/core
+
+      - run: npm ci
+
+      - name: テスト
+        run: |
+          npm run check
+          npm test
+          (cd crates/core && cargo test)
+          (cd src-tauri && cargo test)
+
+      - name: ビルド
+        # 署名鍵がないので、自動アップデート用のファイルは作らない
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mark-shell-macos
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

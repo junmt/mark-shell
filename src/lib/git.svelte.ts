@@ -7,6 +7,7 @@ import { errorMessage } from './api';
 import { i18n, tr } from './i18n.svelte';
 import { basename, dirname, extname } from './paths';
 import { store, type Doc } from './store.svelte';
+import { isMod } from './platform';
 import {
   gitApi,
   groupStatus,
@@ -422,7 +423,7 @@ class GitStore {
   }
 
   selectCommit(hash: string, e: MouseEvent) {
-    if (e.ctrlKey) {
+    if (isMod(e)) {
       this.selectedCommits = this.selectedCommits.includes(hash) ? this.selectedCommits.filter((h) => h !== hash) : [...this.selectedCommits, hash];
     } else if (e.shiftKey && this.selectedCommits.length) {
       const hashes = this.log.map((c) => c.hash);

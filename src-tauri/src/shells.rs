@@ -30,6 +30,7 @@ impl ShellInfo {
 
 static SHELLS: OnceLock<Vec<ShellInfo>> = OnceLock::new();
 
+#[cfg(windows)]
 fn sys_root() -> PathBuf {
     PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
 }
@@ -45,10 +46,11 @@ fn shell(id: &str, name: &str, program: PathBuf, args: &[&str]) -> ShellInfo {
 }
 
 /// PowerShell の出力を UTF-8 にしてから対話モードに入る
+#[cfg(windows)]
 const PS_INIT: &str = "[Console]::OutputEncoding=[Console]::InputEncoding=[System.Text.Encoding]::UTF8";
 
+#[cfg(windows)]
 fn detect() -> Vec<ShellInfo> {
-    use std::os::windows::process::CommandExt;
     let mut out = Vec::new();
     if let Ok(p) = which::which("pwsh") {
         out.push(shell("pwsh", "PowerShell 7", p, &["-NoLogo", "-NoExit", "-Command", PS_INIT]));
@@ -80,10 +82,7 @@ fn detect() -> Vec<ShellInfo> {
     }
     let wsl = sys_root().join(r"System32\wsl.exe");
     if wsl.exists() {
-        if let Ok(o) = std::process::Command::new(&wsl)
-            .args(["-l", "-q"])
-            .creation_flags(0x0800_0000)
-            .output()
+        if let Ok(o) = crate::platform::hide_console(std::process::Command::new(&wsl).args(["-l", "-q"])).output()
         {
             // wsl.exe -l は UTF-16LE で出力する
             let units: Vec<u16> = o.stdout.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
@@ -98,11 +97,29 @@ fn detect() -> Vec<ShellInfo> {
     out
 }
 
+/// Mac / Linux: ログインシェル（$SHELL）を先頭に、入っている zsh / bash / fish を並べる
+#[cfg(not(windows))]
+fn detect() -> Vec<ShellInfo> {
+    let mut candidates: Vec<PathBuf> = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).map(PathBuf::from).into_iter().collect();
+    for p in ["/bin/zsh", "/bin/bash", "/opt/homebrew/bin/fish", "/usr/local/bin/fish", "/usr/bin/fish"] {
+        candidates.push(PathBuf::from(p));
+    }
+    let mut out: Vec<ShellInfo> = Vec::new();
+    for p in candidates {
+        let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+        if !p.is_file() || out.iter().any(|s| s.id == name) {
+            continue;
+        }
+        out.push(shell(&name, &name, p, &["-l"]));
+    }
+    out
+}
+
 pub fn all() -> &'static [ShellInfo] {
     SHELLS.get_or_init(detect)
 }
 
-/// 指定のシェル。なければ PowerShell 7 → Windows PowerShell → 最初に見つかったもの
+/// 指定のシェル。なければ PowerShell 7 → Windows PowerShell → 最初に見つかったもの（Mac ではログインシェル）
 pub fn find(id: Option<&str>) -> Option<&'static ShellInfo> {
     let shells = all();
     id.and_then(|id| shells.iter().find(|s| s.id == id))

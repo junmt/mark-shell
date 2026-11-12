@@ -1,5 +1,6 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
+  import { keyLabel } from '../lib/platform';
 
   let el: HTMLDivElement | undefined = $state();
   let pos = $state({ x: 0, y: 0 });
@@ -32,7 +33,7 @@
       {:else}
         <button class="item" role="menuitem" disabled={item.disabled} onclick={() => run(item)}>
           <span class="label">{item.label}</span>
-          {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
+          {#if item.shortcut}<span class="shortcut">{keyLabel(item.shortcut)}</span>{/if}
         </button>
       {/if}
     {/each}

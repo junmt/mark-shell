@@ -9,6 +9,7 @@
   import GitHistory from './GitHistory.svelte';
   import GitRefs from './GitRefs.svelte';
   import GitStashes from './GitStashes.svelte';
+  import { IS_MAC, isMod } from '../lib/platform';
 
   const b = $derived(git.branch);
   const st = $derived(git.repoState);
@@ -119,7 +120,7 @@
 
   function messageKey(e: KeyboardEvent) {
     const ta = e.currentTarget as HTMLTextAreaElement;
-    if (e.key === 'Enter' && e.ctrlKey) {
+    if (e.key === 'Enter' && isMod(e)) {
       e.preventDefault();
       void git.commit();
     } else if ((e.key === 'ArrowUp' && ta.selectionStart === 0) || (e.key === 'ArrowDown' && ta.selectionEnd === ta.value.length)) {
@@ -150,7 +151,7 @@
       <p>{tr('git が見つかりません。', 'git was not found.', '找不到 git。')}</p>
       {#if git.info.error}<p class="muted small">{git.info.error}</p>{/if}
       {#if !store.wsl}
-        <button class="link" onclick={() => void openUrl('https://git-scm.com/download/win')}>{tr('Git for Windows を入手する', 'Get Git for Windows', '获取 Git for Windows')}</button>
+        <button class="link" onclick={() => void openUrl(IS_MAC ? 'https://git-scm.com/download/mac' : 'https://git-scm.com/download/win')}>{IS_MAC ? tr('Git を入手する', 'Get Git', '获取 Git') : tr('Git for Windows を入手する', 'Get Git for Windows', '获取 Git for Windows')}</button>
       {/if}
     </div>
   {:else if !git.repo}

@@ -9,7 +9,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,8 +20,6 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::paths::normalize_rel;
-
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(has_wsl_agent)]
 const AGENT_BIN: &[u8] = include_bytes!(env!("MARKSHELL_AGENT_BIN"));
@@ -55,7 +52,8 @@ pub fn wsl_exe() -> PathBuf {
 
 fn wsl_command(distro: &str) -> Command {
     let mut c = Command::new(wsl_exe());
-    c.args(["-d", distro, "--exec"]).creation_flags(CREATE_NO_WINDOW);
+    c.args(["-d", distro, "--exec"]);
+    crate::platform::hide_console(&mut c);
     c
 }
 

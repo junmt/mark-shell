@@ -1,6 +1,8 @@
 // 表示言語（日本語・英語・中国語）。設定が 'system' なら PC の言語に合わせ、対応していない言語は英語にする。
 // 文言は呼び出し箇所に 3 言語を並べて書く: tr('保存', 'Save', '保存')
 
+import { keyLabel } from './platform';
+
 export type Locale = 'ja' | 'en' | 'zh';
 export type LanguageSetting = 'system' | Locale;
 
@@ -26,8 +28,8 @@ export function resolveLocale(setting: string | undefined, language?: string): L
   return setting === 'ja' || setting === 'en' || setting === 'zh' ? setting : detectLocale(language);
 }
 
-/** 今の言語の文言を選ぶ */
+/** 今の言語の文言を選ぶ。文言の中のショートカット（Ctrl+S など）は Mac では Cmd+S にする */
 export function tr(ja: string, en: string, zh: string): string {
   const l = i18n.locale;
-  return l === 'ja' ? ja : l === 'zh' ? zh : en;
+  return keyLabel(l === 'ja' ? ja : l === 'zh' ? zh : en);
 }

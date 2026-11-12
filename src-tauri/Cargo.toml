@@ -28,6 +28,9 @@ base64 = "0.22"
 percent-encoding = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# Windows だけで使う（レジストリ、DWM、プロセスの確認）
+[target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
