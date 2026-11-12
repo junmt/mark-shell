@@ -325,6 +325,7 @@ pub fn args_for(tool: &ToolDef, action: Option<&str>, vars: &Vars) -> Result<Vec
 }
 
 /// PowerShell の単一引用符文字列（中身はそのまま渡る）
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
@@ -367,15 +368,11 @@ pub fn launch_ide_tool(
     action_id: Option<String>,
     note: Option<String>,
 ) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     let root = state.root()?;
     let (tool, path) = find(&tool_id)?;
     let vars = Vars::new(&root, note.as_deref(), None);
     let args = args_for(&tool, action_id.as_deref(), &vars)?;
-    std::process::Command::new(&path)
-        .args(&args)
-        .current_dir(&root)
-        .creation_flags(0x0800_0000 | 0x0000_0008) // CREATE_NO_WINDOW | DETACHED_PROCESS
+    crate::platform::detach(std::process::Command::new(&path).args(&args).current_dir(&root))
         .spawn()
         .map(|_| ())
         .map_err(|e| {

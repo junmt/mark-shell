@@ -35,6 +35,7 @@ import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInsi
 import { buildTree, flatten, type TreeNode } from './tree';
 import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type TermLayout } from './termLayout';
 import { git, type GitTab } from './git.svelte';
+import { IS_MAC } from './platform';
 
 const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
 
@@ -1770,7 +1771,7 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
       },
       { id: 'splitTerminalDown', label: tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端'), run: () => this.splitTerminal('column') },
       { id: 'rescan', label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), run: () => void this.rescan() },
-      { id: 'reveal', label: tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
+      { id: 'reveal', label: IS_MAC ? tr('Finder で表示', 'Reveal in Finder', '在访达中显示') : tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
       { id: 'print', label: tr('印刷 / PDF に保存', 'Print / Save as PDF', '打印 / 保存为 PDF'), run: () => void this.print() },
       {
         id: 'aiGuide',

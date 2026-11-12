@@ -1,8 +1,13 @@
 mod ai_context;
 mod ai_tools;
+#[cfg(windows)]
+mod cli;
+#[cfg(not(windows))]
+#[path = "cli_unsupported.rs"]
 mod cli;
 mod config;
 mod git;
+mod platform;
 mod protocol;
 mod pty;
 mod search;
@@ -29,9 +34,52 @@ pub fn unregister_cli() {
     cli::unregister();
 }
 
+/// Mac のメニューバー。既定のメニューにある「ウィンドウを閉じる（Cmd+W）」を外して、Cmd+W をタブを閉じるのに使う。
+/// コピー・貼り付けはメニューがないと WebView で効かないので入れる。取り消し（Cmd+Z）とすべて選択（Cmd+A）はエディタに任せる
+#[cfg(target_os = "macos")]
+fn mac_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    // 終了は、閉じる前の確認（保存していない変更など）を通すため、ウィンドウを閉じる操作にする
+    let quit = MenuItem::with_id(app, "quit", "Quit mark-shell", true, Some("CmdOrCtrl+Q"))?;
+    let app_menu = Submenu::with_items(
+        app,
+        "mark-shell",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[&PredefinedMenuItem::cut(app, None)?, &PredefinedMenuItem::copy(app, None)?, &PredefinedMenuItem::paste(app, None)?],
+    )?;
+    let window = Submenu::with_items(app, "Window", true, &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::fullscreen(app, None)?])?;
+    Menu::with_items(app, &[&app_menu, &edit, &window])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[cfg(target_os = "macos")]
+    platform::inherit_login_path();
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(mac_menu).on_menu_event(|app, event| {
+        use tauri::Manager;
+        if event.id() == "quit" {
+            for w in app.webview_windows().values() {
+                let _ = w.close();
+            }
+        }
+    });
+    builder
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

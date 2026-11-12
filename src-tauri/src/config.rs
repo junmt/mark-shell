@@ -183,17 +183,16 @@ pub fn list_recovery(state: State<'_, AppState>) -> Result<Vec<RecoveryEntry>, S
 // ---- エクスプローラーの右クリックメニュー（HKCU なので管理者権限は不要） ----
 
 /// （キー, 渡す引数）。フォルダ・フォルダの空いている所・ファイルで「mark-shell で開く」を出す
+#[cfg(windows)]
 const MENU_KEYS: &[(&str, &str)] = &[
     (r"HKCU\Software\Classes\Directory\shell\mark-shell", "%1"),
     (r"HKCU\Software\Classes\Directory\Background\shell\mark-shell", "%V"),
     (r"HKCU\Software\Classes\*\shell\mark-shell", "%1"),
 ];
 
+#[cfg(windows)]
 fn reg(args: &[&str]) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    let status = std::process::Command::new("reg.exe")
-        .args(args)
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+    let status = crate::platform::hide_console(std::process::Command::new("reg.exe").args(args))
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
@@ -205,6 +204,7 @@ fn reg(args: &[&str]) -> Result<(), String> {
 
 /// 右クリックメニューに登録する（enable が false なら外す）。起動のたびにも呼ばれ、
 /// アップデートや移動で変わった実行ファイルの場所と、メニューの言語を登録し直す
+#[cfg(windows)]
 #[tauri::command]
 pub async fn register_explorer_menu(enable: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -229,13 +229,28 @@ pub async fn register_explorer_menu(enable: bool) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(windows)]
 #[tauri::command]
 pub fn is_explorer_menu_registered() -> bool {
-    use std::os::windows::process::CommandExt;
-    std::process::Command::new("reg.exe")
-        .args(["query", MENU_KEYS[0].0])
-        .creation_flags(0x0800_0000)
+    crate::platform::hide_console(std::process::Command::new("reg.exe").args(["query", MENU_KEYS[0].0]))
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+// エクスプローラーのメニューは Windows だけ
+#[cfg(not(windows))]
+#[tauri::command]
+pub async fn register_explorer_menu(enable: bool) -> Result<(), String> {
+    if enable {
+        Err(markshell_core::tr!("この機能は Windows だけで使えます", "This feature is only available on Windows", "此功能仅适用于 Windows"))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn is_explorer_menu_registered() -> bool {
+    false
 }

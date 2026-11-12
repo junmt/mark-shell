@@ -144,17 +144,7 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
                     c.args(&args);
                     c
                 } else {
-                    // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
-                    // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
-                    let ps = shells::powershell()
-                        .ok_or_else(|| tr!("PowerShell が見つかりません", "PowerShell was not found", "找不到 PowerShell"))?;
-                    let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
-                        .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let mut c = CommandBuilder::new(&ps.program);
-                    c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
-                    c
+                    tool_in_shell(&path, &args)?
                 };
                 cmd.cwd(tool_cwd.unwrap_or_else(|| cwd.clone()));
                 (cmd, tool.name, false)
@@ -197,6 +187,14 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     }
     cmd.env("MARKSHELL_CONTEXT_FILE", ai_context::context_file().to_string_lossy().as_ref());
     cmd.env("COLORTERM", "truecolor");
+    // Mac で Finder から起動したアプリには TERM や LANG がないので、日本語や色が崩れないよう補う
+    #[cfg(not(windows))]
+    {
+        cmd.env("TERM", "xterm-256color");
+        if std::env::var_os("LANG").is_none() {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
+    }
     cmd.env("TERM_PROGRAM", "mark-shell");
 
     let pair = native_pty_system()
@@ -258,6 +256,33 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     Ok(SpawnResult { id, title })
 }
 
+/// ツールをシェル経由で起動する。PowerShell 経由なので .cmd / .ps1 の起動スクリプトもそのまま動き、
+/// 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
+#[cfg(windows)]
+fn tool_in_shell(path: &Path, args: &[String]) -> Result<CommandBuilder, String> {
+    let ps = shells::powershell().ok_or_else(|| tr!("PowerShell が見つかりません", "PowerShell was not found", "找不到 PowerShell"))?;
+    let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
+        .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut c = CommandBuilder::new(&ps.program);
+    c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
+    Ok(c)
+}
+
+/// Mac / Linux: sh で起動し、終わったらログインシェルに切り替える（引数は "$@" でそのまま渡る）
+#[cfg(not(windows))]
+fn tool_in_shell(path: &Path, args: &[String]) -> Result<CommandBuilder, String> {
+    let sh = shells::find(None).ok_or_else(|| tr!("使えるシェルが見つかりません", "No usable shell was found", "找不到可用的 Shell"))?;
+    let mut c = CommandBuilder::new("/bin/sh");
+    c.args(["-c", "\"$@\"; exec \"$0\" -l"]);
+    c.arg(&sh.program);
+    c.arg(path);
+    c.args(args);
+    Ok(c)
+}
+
+#[cfg(windows)]
 const PS_INIT: &str = "[Console]::OutputEncoding=[Console]::InputEncoding=[System.Text.Encoding]::UTF8";
 
 #[tauri::command]

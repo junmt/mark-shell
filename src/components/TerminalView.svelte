@@ -9,6 +9,7 @@
   import { TERMINAL_FONT } from '../lib/config';
   import { store, type TermSession } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
+  import { IS_MAC } from '../lib/platform';
 
   let { session, active }: { session: TermSession; active: boolean } = $props();
 
@@ -110,9 +111,10 @@
       // 非表示のときは大きさが測れない
     }
 
-    // Ctrl+C は選択中ならコピー、そうでなければシェルへ（中断）。Ctrl+V は貼り付け
+    // Ctrl+C は選択中ならコピー、そうでなければシェルへ（中断）。Ctrl+V は貼り付け。
+    // Mac は Cmd+C / Cmd+V（メニューのコピー・貼り付け）で行い、Ctrl+C / Ctrl+V はそのままシェルへ渡す
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown') return true;
+      if (e.type !== 'keydown' || IS_MAC) return true;
       const key = e.key.toLowerCase();
       if (e.ctrlKey && key === 'c' && (e.shiftKey || term.hasSelection())) {
         void copySelection();

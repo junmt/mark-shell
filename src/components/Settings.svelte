@@ -7,6 +7,7 @@
   import { COLOR_KEYS, DEFAULT_FONTS, FONT_SUGGESTIONS, PRESETS, colorLabel, fontStack, presetFor, presetLabel, resolveTheme, type ColorKey } from '../lib/themes';
   import { LANGUAGE_LABELS, tr, type LanguageSetting } from '../lib/i18n.svelte';
   import Icon from './Icon.svelte';
+  import { IS_MAC } from '../lib/platform';
 
   const languages = Object.entries(LANGUAGE_LABELS) as [LanguageSetting, string][];
   /** フォントの見本（CJK の字形が分かるように漢字を入れる） */
@@ -39,8 +40,8 @@
       const c = untrack(() => $state.snapshot(store.config) as Config);
       draft = c;
       extText = c.markdownExtensions.join(', ');
-      void api.isExplorerMenuRegistered().then((v) => (explorerMenu = v));
-      void api.isCliRegistered().then((v) => (cliCommand = v));
+      if (!IS_MAC) void api.isExplorerMenuRegistered().then((v) => (explorerMenu = v));
+      if (!IS_MAC) void api.isCliRegistered().then((v) => (cliCommand = v));
     } else {
       draft = null;
     }
@@ -136,7 +137,7 @@
         <h3>{tr('配色', 'Colors', '配色')}</h3>
         <label>{tr('配色', 'Color theme', '配色方案')}
           <select bind:value={draft.theme} onchange={onThemeChange}>
-            <option value="system">{tr('Windows の設定に合わせる（ライト / ダーク）', 'Match Windows (light / dark)', '跟随 Windows 设置（浅色 / 深色）')}</option>
+            <option value="system">{IS_MAC ? tr('Mac の設定に合わせる（ライト / ダーク）', 'Match macOS (light / dark)', '跟随 macOS 设置（浅色 / 深色）') : tr('Windows の設定に合わせる（ライト / ダーク）', 'Match Windows (light / dark)', '跟随 Windows 设置（浅色 / 深色）')}</option>
             {#each Object.keys(PRESETS) as id (id)}
               <option value={id}>{presetLabel(id)}</option>
             {/each}
@@ -312,7 +313,7 @@
       </section>
 
       <section>
-        <h3>{tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
+        <h3>{IS_MAC ? tr('AI ツール', 'AI tools', 'AI 工具') : tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
         <p class="note">
           {tr(
             'AI ツールの定義（コマンド名・起動方法・メニュー）は設定ファイルで追加・変更できます。',
@@ -324,6 +325,8 @@
           <button class="btn" onclick={openAiToolsFile}>{tr('AI ツールの定義ファイルを開く', 'Open AI tools config file', '打开 AI 工具定义文件')}</button>
           <button class="btn" onclick={() => void store.refreshAiTools()}>{tr('AI ツールを探し直す', 'Rescan AI tools', '重新查找 AI 工具')}</button>
         </div>
+        <!-- エクスプローラーのメニューと PATH への登録は Windows だけ -->
+        {#if !IS_MAC}
         <div class="row">
           <button class="btn" onclick={toggleExplorerMenu}>
             {explorerMenu
@@ -336,6 +339,7 @@
               : tr('コマンド mark-shell を PATH に追加（WSL などから起動）', 'Add mark-shell command to PATH (launch from WSL, etc.)', '将 mark-shell 命令添加到 PATH（从 WSL 等启动）')}
           </button>
         </div>
+        {/if}
       </section>
 
       <section>

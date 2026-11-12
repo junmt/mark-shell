@@ -21,6 +21,7 @@
   import { git } from './lib/git.svelte';
   import { api } from './lib/api';
   import { opaque } from './lib/vscodeColors';
+  import { IS_MAC, isMod } from './lib/platform';
 
   let leftHeight = $state(600);
   /** ウィンドウが前面にあるか（タイトルバーの色を変える） */
@@ -29,10 +30,10 @@
   onMount(() => {
     void store.init();
     const unlistenFocus = getCurrentWindow().onFocusChanged((e) => (focused = e.payload));
-    // Ctrl+ホイールで、カーソルの下にあるエディタ・プレビュー・ターミナルの文字の大きさを変える。
+    // Ctrl+ホイール（Mac は Cmd+ホイールとピンチ）で、カーソルの下にあるエディタ・プレビュー・ターミナルの文字の大きさを変える。
     // ページ全体の拡大を止めるため passive にしない
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey && !(IS_MAC && e.metaKey)) return;
       e.preventDefault();
       const el = e.target instanceof Element ? e.target : null;
       const target = el?.closest('.term')
@@ -109,24 +110,27 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    const mod = e.ctrlKey && !e.altKey;
+    // Windows は Ctrl、Mac は Cmd。ターミナルの表示と分割は Mac でも Ctrl（VS Code と同じ）
+    const mod = isMod(e) && !e.altKey;
+    const ctrl = e.ctrlKey && !e.altKey;
     const key = e.key.toLowerCase();
     // ターミナルでは Ctrl+P などをシェルに渡す。ターミナル内でも効くのは Ctrl+` と Ctrl+Shift の組み合わせだけ。
     // 日本語キーボードでは ` が Shift+@ なので Ctrl+@ でも切り替える
-    if (mod && !e.shiftKey && (e.code === 'Backquote' || key === '`' || key === '@')) {
+    if (ctrl && !e.shiftKey && (e.code === 'Backquote' || key === '`' || key === '@')) {
       e.preventDefault();
       e.stopPropagation();
       store.toggleTerminal();
       return;
     }
     // Ctrl+Shift+5: ターミナルを左右に分割（VS Code と同じ）。ターミナルの中でも効く
-    if (mod && e.shiftKey && e.code === 'Digit5') {
+    if (ctrl && e.shiftKey && e.code === 'Digit5') {
       e.preventDefault();
       e.stopPropagation();
       store.splitTerminal('row');
       return;
     }
-    if (inTerminal(e) && (!(mod && e.shiftKey) || key === 'c' || key === 'v')) return;
+    // Mac の Cmd の組み合わせはシェルに渡らないので、ターミナルの中でもアプリのショートカットにする
+    if (inTerminal(e) && (IS_MAC ? !mod : !(mod && e.shiftKey) || key === 'c' || key === 'v')) return;
     if (store.dialog || store.palette || git.form) return;
 
     const run = (fn: () => void) => {
@@ -151,8 +155,9 @@
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
       if (key === 'w') return run(() => store.activePath && void store.closeTab(store.activePath));
       if (key === ',') return run(() => (store.settingsOpen = true));
-      if (key === 'tab') return run(() => store.cycleTab(e.shiftKey ? -1 : 1));
     }
+    // タブの切り替えは Mac でも Ctrl+Tab（Cmd+Tab はアプリの切り替え）
+    if (ctrl && key === 'tab') return run(() => store.cycleTab(e.shiftKey ? -1 : 1));
   }
 
   // ウィンドウの外をクリックしたら開いているメニューを閉じる

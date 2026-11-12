@@ -4,9 +4,9 @@
   "version": "0.1.19",
   "identifier": "jp.co.thinkingreed.markshell",
   "build": {
-    "beforeDevCommand": "npm run agent && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run agent && npm run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -43,12 +43,12 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.icns"
     ],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },

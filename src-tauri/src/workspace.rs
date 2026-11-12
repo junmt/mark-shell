@@ -479,17 +479,38 @@ pub fn absolute_path(state: State<'_, AppState>, path: String) -> Result<String,
 
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     let root = state.root()?;
     let p = resolve(&root, &path)?;
+    reveal(&p, path.is_empty())
+}
+
+#[cfg(windows)]
+fn reveal(p: &Path, open_dir: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("explorer.exe");
-    if path.is_empty() {
-        cmd.arg(&p);
+    if open_dir {
+        cmd.arg(p);
     } else {
         // explorer.exe は /select,"パス" を 1 つの引数として受け取る
         cmd.raw_arg(format!("/select,\"{}\"", p.display()));
     }
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Finder で表示する（フォルダならそのまま開き、ファイルなら選んだ状態にする）
+#[cfg(target_os = "macos")]
+fn reveal(p: &Path, open_dir: bool) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("open");
+    if !open_dir {
+        cmd.arg("-R");
+    }
+    cmd.arg(p).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn reveal(p: &Path, open_dir: bool) -> Result<(), String> {
+    let dir = if open_dir { p } else { p.parent().unwrap_or(p) };
+    std::process::Command::new("xdg-open").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// 画像や Office のファイルなど、エディタで開けないファイルを Windows の既定のアプリで開く
@@ -504,6 +525,10 @@ pub fn open_with_default_app(state: State<'_, AppState>, path: String) -> Result
 /// 単体実行版（*-portable.exe）は自動アップデートできないので、画面側でリリースのページに案内する
 #[tauri::command]
 pub fn is_installed() -> bool {
+    // Mac の .app はそのまま自動アップデートできる
+    if !cfg!(windows) {
+        return true;
+    }
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("uninstall.exe").exists()))
