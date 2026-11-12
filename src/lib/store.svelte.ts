@@ -29,6 +29,7 @@ import {
 } from './api';
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { resolveTheme } from './themes';
+import { VSCODE_SETTINGS, projectColorsFromText, type ProjectColors } from './vscodeColors';
 import { i18n, resolveLocale, tr } from './i18n.svelte';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
@@ -174,6 +175,9 @@ class Store {
   systemDark = $state(false);
   /** 配色（プリセットかカスタム）から決めた実際の色 */
   colors = $derived(resolveTheme(this.config.theme, this.config.customColors, this.systemDark));
+  /** 開いているフォルダの .vscode/settings.json の色（タイトルバー・ツールバー・ステータスバー）。設定で切ったときは null */
+  private vscodeColors = $state<ProjectColors | null>(null);
+  projectColors = $derived(this.config.vscodeColors ? this.vscodeColors : null);
   dark = $derived(this.colors.dark);
 
   // ---- 検索 ----
@@ -471,6 +475,7 @@ class Store {
     git.saveDraftNow();
     git.reset();
     this.treeVersion++;
+    void this.loadProjectColors();
 
     const ws = (await api.loadWorkspaceState(res.root)) as WorkspaceState | null;
     this.savedGitRepo = null;
@@ -619,6 +624,8 @@ class Store {
     }
     this.treeVersion++;
     git.onFsChange([...touched]);
+    const settings = VSCODE_SETTINGS.toLowerCase();
+    if ([...touched].some((p) => settings === p.toLowerCase() || settings.startsWith(p.toLowerCase() + '/'))) void this.loadProjectColors();
     for (const p of touched) {
       const lower = p.toLowerCase();
       for (const doc of this.docs) {
@@ -628,6 +635,16 @@ class Store {
       }
       if (this.aiRunning && !this.entries.get(p)?.dir) this.aiChanged.add(p);
     }
+  }
+
+  /** .vscode/settings.json の色を読み直す（ないとき・読めないときは色なし） */
+  private async loadProjectColors() {
+    const root = this.root;
+    const colors = await api
+      .readFile(VSCODE_SETTINGS)
+      .then((r) => projectColorsFromText(r.content))
+      .catch(() => null);
+    if (this.root === root) this.vscodeColors = colors;
   }
 
   /** 開いているファイルが外で変わったかを確かめて取り込む */

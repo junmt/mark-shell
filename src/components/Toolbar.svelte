@@ -80,7 +80,24 @@
     gap: 4px;
     padding: 0 8px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-pane);
+    /* 開いているフォルダの .vscode/settings.json の色（App.svelte が --toolbar-* を設定する） */
+    background: var(--toolbar-bg, var(--bg-pane));
+    color: var(--toolbar-fg, var(--fg));
+  }
+
+  /* プロジェクトの色があるときは、ボタンもツールバーの文字の色に合わせる */
+  .toolbar .icon-btn {
+    color: var(--toolbar-fg, var(--fg-muted));
+  }
+
+  .toolbar .icon-btn:hover {
+    color: var(--toolbar-fg, var(--fg));
+    background: var(--toolbar-hover, var(--bg-hover));
+  }
+
+  .toolbar .icon-btn.on {
+    color: var(--toolbar-fg, var(--accent));
+    background: var(--toolbar-active, var(--bg-active));
   }
 
   .icon-btn {
@@ -95,7 +112,7 @@
     gap: 6px;
     border: none;
     background: transparent;
-    color: var(--fg);
+    color: inherit;
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
@@ -110,7 +127,7 @@
   }
 
   .folder:hover {
-    background: var(--bg-hover);
+    background: var(--toolbar-hover, var(--bg-hover));
   }
 
   .spacer {
@@ -118,7 +135,7 @@
   }
 
   .ai {
-    color: var(--accent);
+    color: var(--toolbar-fg, var(--accent));
     font-weight: 600;
   }
 </style>

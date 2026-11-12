@@ -10,6 +10,8 @@ export type Config = {
   theme: string;
   /** theme が 'custom' のときの配色（元にするプリセットと、変えた色） */
   customColors: CustomColors;
+  /** 開いているフォルダの .vscode/settings.json（workbench.colorCustomizations）の色を、タイトルバー・ツールバー・ステータスバーに使う */
+  vscodeColors: boolean;
   /** 画面全体（メニュー・ツリー・タブ）のフォント。空なら既定 */
   uiFontFamily: string;
   editorFontSize: number;
@@ -62,6 +64,7 @@ export const defaultConfig: Config = {
   language: 'system',
   theme: 'system',
   customColors: { base: 'light', colors: {} },
+  vscodeColors: true,
   uiFontFamily: '',
   editorFontSize: 15,
   editorFontFamily: '',

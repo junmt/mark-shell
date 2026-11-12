@@ -92,6 +92,8 @@ export const api = {
   absolutePath: (path: string) => invoke<string>('absolute_path', { path }),
   openNewWindow: (path?: string) => invoke<void>('open_new_window', { path }),
   takeRestoreWindows: () => invoke<string[]>('take_restore_windows'),
+  setTitleBarColors: (background: string | null, foreground: string | null) =>
+    invoke<void>('set_title_bar_colors', { background, foreground }),
   isInstalled: () => invoke<boolean>('is_installed'),
   setLocale: (locale: string) => invoke<void>('set_locale', { locale }),
   openWithDefaultApp: (path: string) => invoke<void>('open_with_default_app', { path }),

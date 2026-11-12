@@ -76,8 +76,9 @@
     gap: 14px;
     padding: 0 10px;
     font-size: 12px;
-    color: var(--fg-muted);
-    background: var(--bg-pane);
+    /* 開いているフォルダの .vscode/settings.json の色（App.svelte が --status-* を設定する） */
+    color: var(--status-fg, var(--fg-muted));
+    background: var(--status-bg, var(--bg-pane));
     border-top: 1px solid var(--border);
     white-space: nowrap;
     overflow: hidden;
@@ -106,13 +107,13 @@
   }
 
   .branch:hover {
-    background: var(--bg-hover);
-    color: var(--fg);
+    background: var(--status-hover, var(--bg-hover));
+    color: var(--status-fg, var(--fg));
   }
 
   .ai,
   .wsl {
-    color: var(--accent);
+    color: var(--status-fg, var(--accent));
   }
 
   .wsl {
