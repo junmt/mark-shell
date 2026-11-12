@@ -40,14 +40,47 @@ if command -v setsid >/dev/null 2>&1; then
 else
   nohup "$exe" "$@" </dev/null >/dev/null 2>&1 &
 fi
+# Windows 側でアプリが起動する前にシェルが終わると（wsl.exe -e mark-shell . など）、起動が取り消されることがあるので少し待つ
+sleep 0.5
 "#,
         exe = sh_quote(exe)
     )
 }
 
-/// cmd / PowerShell から使うスクリプト
+/// 文字列を cmd の中で、日本語などを含まない形にする（%LOCALAPPDATA% などに置き換える）。できなければ None
+fn ascii_for_cmd(path: &str, env: &[(&str, Option<String>)]) -> Option<String> {
+    if path.is_ascii() {
+        return Some(path.to_string());
+    }
+    for (name, value) in env {
+        let Some(value) = value.as_deref().map(|v| v.trim_end_matches('\\')) else { continue };
+        if value.is_empty() || path.len() <= value.len() || !path.is_char_boundary(value.len()) {
+            continue;
+        }
+        let (head, rest) = path.split_at(value.len());
+        if head.eq_ignore_ascii_case(value) && rest.starts_with('\\') && rest.is_ascii() {
+            return Some(format!("%{name}%{rest}"));
+        }
+    }
+    None
+}
+
+/// cmd / PowerShell から使うスクリプト。cmd は .cmd をコンソールのコードページ（日本語版なら 932）で読むので、
+/// UTF-8 の日本語を書くと文字化けする。パスは %LOCALAPPDATA% などに置き換えて ASCII だけにし、
+/// それでも日本語が残るときは、その間だけコードページを UTF-8 にする
 fn cmd_script(exe: &str) -> String {
-    format!("@echo off\r\nrem mark-shell を起動する。mark-shell が起動のたびに書き直すので編集しないでください。\r\nstart \"\" \"{exe}\" %*\r\n")
+    let env = [
+        ("LOCALAPPDATA", std::env::var("LOCALAPPDATA").ok()),
+        ("APPDATA", std::env::var("APPDATA").ok()),
+        ("USERPROFILE", std::env::var("USERPROFILE").ok()),
+    ];
+    let head = "@echo off\r\nrem Launches mark-shell. Rewritten by mark-shell on every start; do not edit.\r\nsetlocal\r\n";
+    match ascii_for_cmd(exe, &env) {
+        Some(exe) => format!("{head}start \"\" \"{exe}\" %*\r\n"),
+        None => format!(
+            "{head}for /f \"tokens=2 delims=:\" %%c in ('chcp') do set \"MARKSHELL_CP=%%c\"\r\nchcp 65001 >nul\r\nstart \"\" \"{exe}\" %*\r\nchcp %MARKSHELL_CP% >nul\r\n"
+        ),
+    }
 }
 
 fn env_key(write: bool) -> Result<RegKey, String> {
@@ -161,6 +194,22 @@ mod tests {
     #[test]
     fn script_uses_lf() {
         assert!(!sh_script(r"C:\x\mark-shell.exe").contains('\r'));
+    }
+
+    #[test]
+    fn cmd_path_ascii() {
+        let env = [
+            ("LOCALAPPDATA", Some(r"C:\Users\松田\AppData\Local".to_string())),
+            ("USERPROFILE", Some(r"C:\Users\松田".to_string())),
+        ];
+        assert_eq!(ascii_for_cmd(r"C:\Tools\mark-shell.exe", &env).as_deref(), Some(r"C:\Tools\mark-shell.exe"));
+        assert_eq!(
+            ascii_for_cmd(r"C:\Users\松田\AppData\Local\mark-shell\mark-shell.exe", &env).as_deref(),
+            Some(r"%LOCALAPPDATA%\mark-shell\mark-shell.exe")
+        );
+        assert_eq!(ascii_for_cmd(r"C:\Users\松田\Desktop\mark-shell.exe", &env).as_deref(), Some(r"%USERPROFILE%\Desktop\mark-shell.exe"));
+        assert_eq!(ascii_for_cmd(r"C:\Users\松田\デスクトップ\mark-shell.exe", &env), None);
+        assert_eq!(ascii_for_cmd(r"D:\松田\mark-shell.exe", &env), None);
     }
 
     #[test]
