@@ -143,6 +143,21 @@
             <option value="custom">{tr('カスタム', 'Custom', '自定义')}</option>
           </select>
         </label>
+        <label class="check"
+          ><input type="checkbox" bind:checked={draft.vscodeColors} />
+          {tr(
+            'フォルダの .vscode/settings.json の色をタイトルバー・ツールバー・ステータスバーに使う',
+            "Use colors from the folder's .vscode/settings.json for the title bar, toolbar and status bar",
+            '将文件夹中 .vscode/settings.json 的颜色用于标题栏、工具栏和状态栏',
+          )}</label
+        >
+        <p class="note">
+          {tr(
+            'workbench.colorCustomizations の titleBar・activityBar・statusBar の色を使います（VS Code の拡張機能 Peacock が書く設定）。フォルダごとに色を変えられます。',
+            'Uses the titleBar, activityBar and statusBar colors in workbench.colorCustomizations (as written by the VS Code extension Peacock), so each folder can have its own colors.',
+            '使用 workbench.colorCustomizations 中 titleBar、activityBar、statusBar 的颜色（VS Code 扩展 Peacock 写入的设置）。每个文件夹可以使用不同的颜色。',
+          )}
+        </p>
         {#if draft.theme === 'custom' && sample}
           <label>{tr('元にする配色', 'Base theme', '基础配色')}
             <select bind:value={draft.customColors.base}>

@@ -9,6 +9,7 @@ mod search;
 mod session;
 mod shells;
 mod state;
+mod titlebar;
 mod watcher;
 mod workspace;
 mod wsl;
@@ -72,6 +73,7 @@ pub fn run() {
             workspace::reveal_in_explorer,
             workspace::absolute_path,
             workspace::open_new_window,
+            titlebar::set_title_bar_colors,
             workspace::is_installed,
             workspace::open_with_default_app,
             session::take_restore_windows,

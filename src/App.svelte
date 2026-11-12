@@ -19,11 +19,16 @@
   import TerminalList from './components/TerminalList.svelte';
   import GitForm from './components/GitForm.svelte';
   import { git } from './lib/git.svelte';
+  import { api } from './lib/api';
+  import { opaque } from './lib/vscodeColors';
 
   let leftHeight = $state(600);
+  /** ウィンドウが前面にあるか（タイトルバーの色を変える） */
+  let focused = $state(document.hasFocus());
 
   onMount(() => {
     void store.init();
+    const unlistenFocus = getCurrentWindow().onFocusChanged((e) => (focused = e.payload));
     // Ctrl+ホイールで、カーソルの下にあるエディタ・プレビュー・ターミナルの文字の大きさを変える。
     // ページ全体の拡大を止めるため passive にしない
     const onWheel = (e: WheelEvent) => {
@@ -40,7 +45,10 @@
       if (target && e.deltaY !== 0) store.adjustFontSize(target, e.deltaY < 0 ? 1 : -1);
     };
     window.addEventListener('wheel', onWheel, { passive: false, capture: true });
-    return () => window.removeEventListener('wheel', onWheel, { capture: true });
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true });
+      void unlistenFocus.then((f) => f());
+    };
   });
 
   // 配色とフォントを CSS 変数にする（app.css の値は、ここが動く前の既定）
@@ -50,6 +58,34 @@
     for (const [name, value] of Object.entries(store.colors.vars)) root.style.setProperty(`--${name}`, value);
     root.style.setProperty('--ui-font', fontStack(store.config.uiFontFamily, DEFAULT_FONTS.ui));
     root.style.setProperty('--preview-font', fontStack(store.config.previewFontFamily, DEFAULT_FONTS.preview));
+  });
+
+  // 開いているフォルダの .vscode/settings.json の色（Peacock など）を、ツールバー・ステータスバー・タイトルバーに使う
+  $effect(() => {
+    const c = store.projectColors;
+    const root = document.documentElement;
+    const vars: Record<string, string | undefined> = {
+      'toolbar-bg': c?.toolbarBg,
+      'toolbar-fg': c?.toolbarFg,
+      'status-bg': c?.statusBg,
+      'status-fg': c?.statusFg,
+      'status-hover': c?.statusHoverBg ?? (c?.statusFg && `color-mix(in srgb, ${c.statusFg} 16%, transparent)`),
+      // 色付きのツールバーの上のボタンのホバー・選択中の背景は、文字の色を薄くして作る
+      'toolbar-hover': c?.toolbarFg && `color-mix(in srgb, ${c.toolbarFg} 16%, transparent)`,
+      'toolbar-active': c?.toolbarFg && `color-mix(in srgb, ${c.toolbarFg} 26%, transparent)`,
+    };
+    for (const [name, value] of Object.entries(vars)) {
+      if (value) root.style.setProperty(`--${name}`, value);
+      else root.style.removeProperty(`--${name}`);
+    }
+  });
+  $effect(() => {
+    const c = store.projectColors;
+    const bg = focused ? c?.titleBg : (c?.titleInactiveBg ?? c?.titleBg);
+    const fg = focused ? c?.titleFg : (c?.titleInactiveFg ?? c?.titleFg);
+    // 透明度のある色（Peacock の非アクティブの色など）は、いつもの配色の背景と混ぜる。文字は混ぜた後の背景と混ぜる
+    const bgSolid = opaque(bg, store.colors.colors.bgPane);
+    void api.setTitleBarColors(bgSolid, opaque(fg, bgSolid ?? store.colors.colors.bgPane)).catch(() => {});
   });
 
   // 開いているファイルと選択範囲を Claude Code に伝える（store.cursor は選択が変わるたびに置き換わる）
