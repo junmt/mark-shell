@@ -1,6 +1,6 @@
 [package]
 name = "mark-shell"
-version = "0.1.19"
+version = "0.1.20"
 description = "Markdown メモとシェルで AI を使える Windows アプリ"
 edition = "2021"
 
@@ -30,6 +30,11 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+# WebView2 の設定（使っていないウィンドウのメモリを減らす）。版は wry が使うものに合わせる
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
 
 [profile.release]
 codegen-units = 1
