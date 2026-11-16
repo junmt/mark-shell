@@ -3,6 +3,7 @@ mod ai_tools;
 mod cli;
 mod config;
 mod git;
+mod memory;
 mod protocol;
 mod pty;
 mod search;
@@ -38,6 +39,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState::new())
+        .on_window_event(memory::on_window_event)
         .register_uri_scheme_protocol("mdimg", protocol::handle)
         .invoke_handler(tauri::generate_handler![
             config::get_config,
