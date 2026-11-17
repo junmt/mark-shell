@@ -131,6 +131,7 @@ export type Toast = { id: number; message: string; kind: 'info' | 'error' };
 export type Command = { id: string; label: string; shortcut?: string; run: () => void };
 export type AiUsageState = {
   output: string;
+  detail: string;
   error: string | null;
   loading: boolean;
   updatedAt: number | null;
@@ -355,7 +356,7 @@ class Store {
 
   async refreshAiTools() {
     this.aiTools = await api.listAiTools();
-    if (this.terminalVisible) void this.refreshAiUsage();
+    void this.refreshAiUsage();
   }
 
   /** ツールごとの Usage 取得コマンド（設定画面の指定を優先し、なければ ai-tools.json の usageCommand） */
@@ -363,12 +364,19 @@ class Store {
     return (this.config.aiUsageCommands?.[tool.id] ?? '').trim() || (tool.usageCommand ?? '').trim();
   }
 
+  /** 左ペインに表示する AI Usage の対象ツール（インストール済み、または設定でコマンドを指定したもの） */
+  usageTargets(): { tool: ToolInfo; cmd: string }[] {
+    const anyFound = this.aiTools.some((t) => t.found);
+    return this.aiTools
+      .filter((t) => !anyFound || t.found || (this.config.aiUsageCommands?.[t.id] ?? '').trim().length > 0)
+      .map((tool) => ({ tool, cmd: this.usageCommandFor(tool) }))
+      .filter((x) => x.cmd.length > 0);
+  }
+
   /** 各 AI ツールの Usage コマンドを実行して結果を更新する */
   async refreshAiUsage() {
     if (this.aiUsageRefreshing) return;
-    const targets = this.aiTools
-      .map((t) => ({ tool: t, cmd: this.usageCommandFor(t) }))
-      .filter((x) => x.cmd.length > 0);
+    const targets = this.usageTargets();
     const activeIds = new Set(targets.map((x) => x.tool.id));
     for (const k of [...this.aiUsage.keys()]) {
       if (!activeIds.has(k)) this.aiUsage.delete(k);
@@ -380,6 +388,7 @@ class Store {
       const prev = this.aiUsage.get(tool.id);
       this.aiUsage.set(tool.id, {
         output: prev?.output ?? '',
+        detail: prev?.detail ?? '',
         error: prev?.error ?? null,
         loading: true,
         updatedAt: prev?.updatedAt ?? null,
@@ -392,6 +401,7 @@ class Store {
             const res = await api.runAiUsage(tool.id, cmd, note);
             this.aiUsage.set(tool.id, {
               output: res.output,
+              detail: res.detail,
               error: res.error,
               loading: false,
               updatedAt: Date.now(),
@@ -399,6 +409,7 @@ class Store {
           } catch (e) {
             this.aiUsage.set(tool.id, {
               output: '',
+              detail: '',
               error: errorMessage(e),
               loading: false,
               updatedAt: Date.now(),

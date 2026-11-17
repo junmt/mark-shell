@@ -176,10 +176,10 @@
           </div>
           <Splitter
             direction="horizontal"
-            onresize={(d) => (store.terminalListHeight = Math.min(Math.max(60, store.terminalListHeight - d), leftHeight - 120))}
+            onresize={(d) => (store.terminalListHeight = Math.min(Math.max(60, store.terminalListHeight - d), leftHeight - 180))}
             ondone={() => store.saveWorkspaceState()}
           />
-          <div class="left-terms" style:height="{store.terminalListHeight}px">
+          <div class="left-terms">
             <TerminalList />
           </div>
         </div>

@@ -1,10 +1,40 @@
 <script lang="ts">
-  import { store, type MenuItem, type TermSession } from '../lib/store.svelte';
+  import { store, type AiUsageState, type MenuItem, type TermSession } from '../lib/store.svelte';
   import Icon from './Icon.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { keysOf } from '../lib/termLayout';
+  import type { ToolInfo } from '../lib/api';
 
-  // 左ペインの下側に並べるターミナルの一覧（ターミナル本体は右ペインの下側）
+  // 左ペインの下側に並べるターミナルの一覧と、その下の各 AI の Usage 表示
+
+  const usageItems = $derived(
+    store.usageTargets().map(({ tool, cmd }) => ({
+      tool,
+      cmd,
+      state: store.aiUsage.get(tool.id),
+    })),
+  );
+
+  // 設定された間隔（既定 30 秒）で各 AI の Usage コマンドを実行する
+  $effect(() => {
+    const interval = store.config.terminal.usageInterval;
+    const sig = store.usageTargets().map((x) => `${x.tool.id}:${x.cmd}`).join('\n');
+    void sig;
+    void store.refreshAiUsage();
+    if (interval <= 0) return;
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void store.refreshAiUsage();
+    }, interval * 1000);
+    return () => clearInterval(id);
+  });
+
+  function usageTooltip(tool: ToolInfo, cmd: string, state: AiUsageState | undefined): string {
+    const lines = [tool.name, `${tr('コマンド', 'Command', '命令')}: ${cmd}`];
+    if (state?.error) lines.push(state.error);
+    else if (state?.detail) lines.push(state.detail);
+    else if (state?.output) lines.push(state.output);
+    return lines.join('\n');
+  }
 
   function newMenu(e: MouseEvent) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -58,80 +88,133 @@
 </script>
 
 <div class="list">
-  <div class="header">
-    <span class="label">{tr('ターミナル', 'Terminals', '终端')}</span>
-    <div class="spacer"></div>
-    <button class="icon-btn" title={tr('新しいターミナル', 'New terminal', '新建终端')} onclick={() => store.newTerminal()}><Icon name="plus" size={14} /></button>
-    <button
-      class="icon-btn"
-      title={tr('ターミナルを左右に分割 (Ctrl+Shift+5)', 'Split terminal right (Ctrl+Shift+5)', '向右拆分终端 (Ctrl+Shift+5)')}
-      onclick={() => store.splitTerminal('row')}
-      disabled={store.terminals.length === 0}><Icon name="splitRight" size={14} /></button
-    >
-    <button
-      class="icon-btn"
-      title={tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端')}
-      onclick={() => store.splitTerminal('column')}
-      disabled={store.terminals.length === 0}><Icon name="splitDown" size={14} /></button
-    >
-    <button class="icon-btn" title={tr('シェルや AI を選んで開く', 'Choose a shell or AI tool to open', '选择要打开的 Shell 或 AI')} onclick={newMenu}>
-      <Icon name="chevronDown" size={12} stroke={2} />
-    </button>
-    <button
-      class="icon-btn"
-      class:flip={!store.terminalVisible}
-      title={store.terminalVisible
-        ? tr('ターミナルを隠す (Ctrl+`)', 'Hide terminal (Ctrl+`)', '隐藏终端 (Ctrl+`)')
-        : tr('ターミナルを表示 (Ctrl+`)', 'Show terminal (Ctrl+`)', '显示终端 (Ctrl+`)')}
-      onclick={() => store.toggleTerminal()}
-    >
-      <Icon name="chevronDown" size={14} stroke={2} />
-    </button>
-  </div>
-  <div class="items" role="tablist" aria-orientation="vertical">
-    {#each store.terminals as t (t.key)}
-      <div
-        class="item"
-        class:active={store.activeTerminal === t.key}
-        class:exited={t.exited}
-        class:grouped={groupPos.has(t.key)}
-        class:group-first={groupPos.get(t.key) === 'first'}
-        class:group-last={groupPos.get(t.key) === 'last'}
-        role="tab"
-        tabindex="0"
-        aria-selected={store.activeTerminal === t.key}
-        title={tooltip(t)}
-        onclick={() => select(t)}
-        onkeydown={(e) => e.key === 'Enter' && select(t)}
-        oncontextmenu={(e) => itemMenu(e, t)}
+  <div class="terms" style:height="{store.terminalListHeight}px">
+    <div class="header">
+      <span class="label">{tr('ターミナル', 'Terminals', '终端')}</span>
+      <div class="spacer"></div>
+      <button class="icon-btn" title={tr('新しいターミナル', 'New terminal', '新建终端')} onclick={() => store.newTerminal()}><Icon name="plus" size={14} /></button>
+      <button
+        class="icon-btn"
+        title={tr('ターミナルを左右に分割 (Ctrl+Shift+5)', 'Split terminal right (Ctrl+Shift+5)', '向右拆分终端 (Ctrl+Shift+5)')}
+        onclick={() => store.splitTerminal('row')}
+        disabled={store.terminals.length === 0}><Icon name="splitRight" size={14} /></button
       >
-        <!-- 状態: 処理中は点滅、待機中は小さな点、終了は輪 -->
-        <span class="status" class:busy={t.busy} class:exited={t.exited} aria-label={status(t)}></span>
-        <span class="kind"><Icon name={t.ai ? 'sparkle' : 'terminal'} size={13} /></span>
-        <span class="text">
-          <span class="title">{t.title}{#if t.exited}<span class="state">{tr('（終了）', '(exited)', '（已退出）')}</span>{/if}</span>
-          {#if t.ai && t.osTitle}<span class="sub">{t.osTitle}</span>{/if}
-        </span>
-        <button
-          class="close"
-          title={tr('閉じる', 'Close', '关闭')}
-          onclick={(e) => {
-            e.stopPropagation();
-            store.closeTerminal(t.key);
-          }}>✕</button
+      <button
+        class="icon-btn"
+        title={tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端')}
+        onclick={() => store.splitTerminal('column')}
+        disabled={store.terminals.length === 0}><Icon name="splitDown" size={14} /></button
+      >
+      <button class="icon-btn" title={tr('シェルや AI を選んで開く', 'Choose a shell or AI tool to open', '选择要打开的 Shell 或 AI')} onclick={newMenu}>
+        <Icon name="chevronDown" size={12} stroke={2} />
+      </button>
+      <button
+        class="icon-btn"
+        class:flip={!store.terminalVisible}
+        title={store.terminalVisible
+          ? tr('ターミナルを隠す (Ctrl+`)', 'Hide terminal (Ctrl+`)', '隐藏终端 (Ctrl+`)')
+          : tr('ターミナルを表示 (Ctrl+`)', 'Show terminal (Ctrl+`)', '显示终端 (Ctrl+`)')}
+        onclick={() => store.toggleTerminal()}
+      >
+        <Icon name="chevronDown" size={14} stroke={2} />
+      </button>
+    </div>
+    <div class="items" role="tablist" aria-orientation="vertical">
+      {#each store.terminals as t (t.key)}
+        <div
+          class="item"
+          class:active={store.activeTerminal === t.key}
+          class:exited={t.exited}
+          class:grouped={groupPos.has(t.key)}
+          class:group-first={groupPos.get(t.key) === 'first'}
+          class:group-last={groupPos.get(t.key) === 'last'}
+          role="tab"
+          tabindex="0"
+          aria-selected={store.activeTerminal === t.key}
+          title={tooltip(t)}
+          onclick={() => select(t)}
+          onkeydown={(e) => e.key === 'Enter' && select(t)}
+          oncontextmenu={(e) => itemMenu(e, t)}
         >
-      </div>
-    {/each}
-    {#if store.terminals.length === 0}
-      <button class="open" onclick={() => store.newTerminal()}>{tr('ターミナルを開く', 'Open terminal', '打开终端')}</button>
-    {/if}
+          <!-- 状態: 処理中は点滅、待機中は小さな点、終了は輪 -->
+          <span class="status" class:busy={t.busy} class:exited={t.exited} aria-label={status(t)}></span>
+          <span class="kind"><Icon name={t.ai ? 'sparkle' : 'terminal'} size={13} /></span>
+          <span class="text">
+            <span class="title">{t.title}{#if t.exited}<span class="state">{tr('（終了）', '(exited)', '（已退出）')}</span>{/if}</span>
+            {#if t.ai && t.osTitle}<span class="sub">{t.osTitle}</span>{/if}
+          </span>
+          <button
+            class="close"
+            title={tr('閉じる', 'Close', '关闭')}
+            onclick={(e) => {
+              e.stopPropagation();
+              store.closeTerminal(t.key);
+            }}>✕</button
+          >
+        </div>
+      {/each}
+      {#if store.terminals.length === 0}
+        <button class="open" onclick={() => store.newTerminal()}>{tr('ターミナルを開く', 'Open terminal', '打开终端')}</button>
+      {/if}
+    </div>
+  </div>
+
+  <div class="usage" aria-label={tr('AI Usage', 'AI Usage', 'AI 用量')}>
+    <div class="header usage-header">
+      <span class="label">AI Usage</span>
+      <div class="spacer"></div>
+      <button
+        class="icon-btn"
+        title={store.config.terminal.usageInterval > 0
+          ? tr(
+              `Usage を今すぐ更新（自動更新: ${store.config.terminal.usageInterval}秒ごと）`,
+              `Refresh usage now (auto-refresh: every ${store.config.terminal.usageInterval}s)`,
+              `立即刷新用量（自动刷新：每 ${store.config.terminal.usageInterval} 秒）`,
+            )
+          : tr('Usage を今すぐ更新（自動更新: オフ）', 'Refresh usage now (auto-refresh: off)', '立即刷新用量（自动刷新：关闭）')}
+        onclick={() => void store.refreshAiUsage()}
+        disabled={store.aiUsageRefreshing}
+      >
+        <Icon name="refresh" size={13} />
+      </button>
+      <button
+        class="icon-btn"
+        title={tr('AI Usage の設定', 'AI Usage settings', 'AI 用量设置')}
+        onclick={() => (store.settingsOpen = true)}
+      >
+        <Icon name="settings" size={13} />
+      </button>
+    </div>
+    <div class="usage-items">
+      {#each usageItems as { tool, cmd, state } (tool.id)}
+        <div class="usage-row" title={usageTooltip(tool, cmd, state)}>
+          <span class="usage-tool">
+            <span class="usage-icon"><Icon name="sparkle" size={12} /></span>
+            <span class="usage-name">{tool.name}</span>
+          </span>
+          {#if state?.error}
+            <span class="usage-val error">{state.error}</span>
+          {:else if state?.output}
+            <span class="usage-val">{state.output}</span>
+          {:else if state?.loading}
+            <span class="usage-val muted">…</span>
+          {:else}
+            <span class="usage-val muted">—</span>
+          {/if}
+        </div>
+      {/each}
+    </div>
   </div>
 </div>
 
 <style>
   .list {
-    flex: 1;
-    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .terms {
+    min-height: 60px;
     display: flex;
     flex-direction: column;
   }
@@ -307,5 +390,69 @@
     background: transparent;
     color: var(--accent);
     cursor: pointer;
+  }
+
+  .usage {
+    flex: none;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .usage-header {
+    height: 26px;
+  }
+
+  .usage-items {
+    padding: 3px 8px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .usage-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    padding: 2px 2px;
+  }
+
+  .usage-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    color: var(--fg);
+  }
+
+  .usage-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--accent);
+  }
+
+  .usage-name {
+    white-space: nowrap;
+  }
+
+  .usage-val {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--editor-mono);
+    font-size: 11px;
+    color: var(--fg-muted);
+    text-align: right;
+  }
+
+  .usage-val.error {
+    color: #dc2626;
+  }
+
+  .usage-val.muted {
+    opacity: 0.7;
   }
 </style>

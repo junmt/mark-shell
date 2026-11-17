@@ -40,7 +40,7 @@ export type ToolInfo = {
   usageCommand: string | null;
   actions: { id: string; label: string }[];
 };
-export type UsageResult = { id: string; output: string; error: string | null };
+export type UsageResult = { id: string; output: string; detail: string; error: string | null };
 
 export type AiSelection = { fromLine: number; toLine: number; text: string };
 

@@ -328,9 +328,9 @@
         <h3>{isMac ? tr('AI ツールとコマンド', 'AI tools and command', 'AI 工具与命令') : tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
         <p class="note">
           {tr(
-            '各 AI の Usage 取得コマンドを指定すると、ターミナルエリアの下に標準出力を表示します（ai-tools.json の usageCommand でも指定できます）。',
-            'Specify a usage command for each AI tool to display its standard output below the terminal area (can also be set via usageCommand in ai-tools.json).',
-            '为各 AI 工具指定用量获取命令后，将在终端区域下方显示其标准输出（也可在 ai-tools.json 的 usageCommand 中指定）。',
+            '左ペインのターミナル一覧の下に各 AI の Usage を表示します（空欄ならプリセットのコマンドを使います）。',
+            'Displays each AI tool’s usage below the terminal list in the left pane (leave blank to use the preset command).',
+            '在左侧面板的终端列表下方显示各 AI 的用量（留空则使用预设命令）。',
           )}
         </p>
         <label>

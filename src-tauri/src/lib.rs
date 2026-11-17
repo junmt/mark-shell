@@ -25,6 +25,11 @@ pub fn print_ai_context() {
     ai_context::print_for_hook();
 }
 
+/// `mark-shell.exe --ai-usage <id>` の処理
+pub fn print_ai_usage(tool_id: &str) {
+    ai_tools::print_for_usage(tool_id);
+}
+
 /// `mark-shell.exe --unregister-cli`（アンインストーラー）の処理
 pub fn unregister_cli() {
     cli::unregister();

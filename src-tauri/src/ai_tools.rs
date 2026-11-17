@@ -27,6 +27,7 @@ const DEFAULT_TOOLS: &str = r#"{
       },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://docs.claude.com/en/docs/claude-code/setup",
+      "usageCommand": "npx --yes ccusage@latest claude daily --json --offline",
       "actions": [
         { "id": "summarize", "label": "このファイルを要約する", "args": ["${noteRelativePath} を読んで、要点をまとめてください"] },
         { "id": "proofread", "label": "このファイルを推敲する", "args": ["${noteRelativePath} の誤字脱字や分かりにくい表現を直してください"] },
@@ -40,6 +41,7 @@ const DEFAULT_TOOLS: &str = r#"{
       "detect": { "command": "gemini", "paths": ["/opt/homebrew/bin/gemini", "/usr/local/bin/gemini", "~/.local/bin/gemini"] },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://github.com/google-gemini/gemini-cli",
+      "usageCommand": "npx --yes ccusage@latest gemini daily --json --offline",
       "actions": [
         { "id": "summarize", "label": "このファイルを要約する", "args": ["-i", "${noteRelativePath} を読んで、要点をまとめてください"] }
       ]
@@ -51,6 +53,7 @@ const DEFAULT_TOOLS: &str = r#"{
       "detect": { "command": "codex", "paths": ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "~/.local/bin/codex"] },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://github.com/openai/codex",
+      "usageCommand": "npx --yes ccusage@latest codex daily --json --offline",
       "actions": [
         { "id": "summarize", "label": "このファイルを要約する", "args": ["${noteRelativePath} を読んで、要点をまとめてください"] }
       ]
@@ -70,6 +73,7 @@ const DEFAULT_TOOLS: &str = r#"{
       },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://antigravity.google/",
+      "usageCommand": "mark-shell --ai-usage antigravity",
       "actions": [
         { "id": "summarize", "label": "このファイルを要約する", "args": ["-i", "${noteRelativePath} を読んで、要点をまとめてください"] },
         { "id": "proofread", "label": "このファイルを推敲する", "args": ["-i", "${noteRelativePath} の誤字脱字や分かりにくい表現を直してください"] },
@@ -198,6 +202,7 @@ pub struct ToolInfo {
 pub struct UsageResult {
     pub id: String,
     pub output: String,
+    pub detail: String,
     pub error: Option<String>,
 }
 
@@ -232,6 +237,7 @@ fn load() -> Vec<ToolDef> {
 
 /// 以前の既定の定義を今の既定に置き換える。置き換えたら true
 /// - Antigravity: IDE（`antigravity` で別ウィンドウを開く）から Antigravity CLI（`agy` をターミナルで実行）へ
+/// - usageCommand が未設定の既定ツールにはプリセットの usageCommand を補う
 fn migrate(file: &mut ToolsFile) -> bool {
     let Ok(defaults) = serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS) else { return false };
     let mut changed = false;
@@ -241,6 +247,15 @@ fn migrate(file: &mut ToolsFile) -> bool {
             if let Some(d) = defaults.tools.iter().find(|d| d.id == t.id) {
                 *t = d.clone();
                 changed = true;
+                continue;
+            }
+        }
+        if t.usage_command.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            if let Some(d) = defaults.tools.iter().find(|d| d.id == t.id) {
+                if d.usage_command.is_some() {
+                    t.usage_command = d.usage_command.clone();
+                    changed = true;
+                }
             }
         }
     }
@@ -481,6 +496,321 @@ fn strip_ansi(s: &str) -> String {
         .into_owned()
 }
 
+/// トークン数を読みやすい短い表記（1.2K、3.4M など）にする
+fn fmt_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{n}")
+    }
+}
+
+/// ISO 8601 の先頭（`YYYY-MM-DDTHH:MM:SS`）から UNIX 秒を求める
+fn parse_iso_secs(s: &str) -> Option<u64> {
+    let b = s.trim().as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || (b[10] != b'T' && b[10] != b' ') || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let y: i64 = s[0..4].parse().ok()?;
+    let m: i64 = s[5..7].parse().ok()?;
+    let d: i64 = s[8..10].parse().ok()?;
+    let hh: u64 = s[11..13].parse().ok()?;
+    let mm: u64 = s[14..16].parse().ok()?;
+    let ss: u64 = s[17..19].parse().ok()?;
+    let y = y - if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = (m + if m > 2 { -3 } else { 9 }) as u64;
+    let doy = (153 * mp + 2) / 5 + d as u64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe as i64 - 719468;
+    if days < 0 {
+        return None;
+    }
+    Some(days as u64 * 86400 + hh * 3600 + mm * 60 + ss)
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// フォルダ以下の指定の拡張子のファイルを深さ上限つきで集める
+fn walk_files(dir: &Path, depth: usize, ext: &str, out: &mut Vec<PathBuf>) {
+    if depth == 0 || !dir.is_dir() {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            walk_files(&p, depth - 1, ext, out);
+        } else if p.extension().and_then(|s| s.to_str()) == Some(ext) {
+            out.push(p);
+        }
+    }
+}
+
+/// トークン数の集計から (1行表示, ツールチップ用の詳細) を組み立てる
+fn format_token_summary(today: u64, total: u64, rate_prefix: Option<&str>) -> (String, String) {
+    let today_s = fmt_tokens(today);
+    let total_s = fmt_tokens(total);
+    let tok_part = tr!(
+        "今日 {today_s} / 計 {total_s} tok",
+        "Today {today_s} / Total {total_s} tok",
+        "今日 {today_s} / 共 {total_s} tok"
+    );
+    let short = match rate_prefix.filter(|s| !s.is_empty()) {
+        Some(r) if total > 0 => format!("{r} · {today_s} tok"),
+        Some(r) => r.to_string(),
+        None => tok_part.clone(),
+    };
+    let detail = match rate_prefix.filter(|s| !s.is_empty()) {
+        Some(r) => format!("{r}\n{tok_part}"),
+        None => tok_part,
+    };
+    (short, detail)
+}
+
+/// Codex の ~/.codex/sessions から最新のレート制限（5h / 7d の使用率）とトークン数を読み取る
+fn codex_local_stats() -> (Option<String>, u64, u64) {
+    let home = std::env::var("CODEX_HOME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")));
+    let Some(base) = home else { return (None, 0, 0) };
+    let mut files = Vec::new();
+    walk_files(&base.join("sessions"), 5, "jsonl", &mut files);
+    files.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+    let now = now_secs();
+    let mut today_tok = 0u64;
+    let mut total_tok = 0u64;
+    let mut latest_rate: Option<String> = None;
+    for f in &files {
+        let recent_file = std::fs::metadata(f)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+            .map(|d| d.as_secs() < 86400)
+            .unwrap_or(false);
+        let Ok(text) = std::fs::read_to_string(f) else { continue };
+        let mut session_tok = 0u64;
+        for line in text.lines() {
+            if !line.contains("token_count") && !line.contains("rate_limits") && !line.contains("total_tokens") {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let rl = v.get("rate_limits").or_else(|| v.pointer("/payload/rate_limits")).or_else(|| v.pointer("/info/rate_limits"));
+            if let Some(rl) = rl {
+                let p = rl.pointer("/primary/used_percent").and_then(|x| x.as_f64());
+                let s = rl.pointer("/secondary/used_percent").and_then(|x| x.as_f64());
+                let parts: Vec<String> = [p.map(|v| format!("5h: {:.0}%", v)), s.map(|v| format!("7d: {:.0}%", v))]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if !parts.is_empty() {
+                    latest_rate = Some(parts.join(" · "));
+                }
+            }
+            if let Some(t) = v
+                .pointer("/payload/info/total_token_usage/total_tokens")
+                .or_else(|| v.pointer("/info/total_token_usage/total_tokens"))
+                .and_then(|x| x.as_u64())
+            {
+                session_tok = session_tok.max(t);
+            }
+        }
+        total_tok = total_tok.saturating_add(session_tok);
+        if recent_file {
+            today_tok = today_tok.saturating_add(session_tok);
+        }
+    }
+    let _ = now;
+    (latest_rate, today_tok, total_tok)
+}
+
+/// 各 AI ツールがローカルに残すセッションログから Usage（トークン数・レート制限）を集計する
+fn collect_local_usage(tool_id: &str) -> (String, String) {
+    let now = now_secs();
+    match tool_id {
+        "claude-code" => {
+            let mut dirs = Vec::new();
+            if let Some(h) = dirs::home_dir() {
+                dirs.push(h.join(".claude").join("projects"));
+                dirs.push(h.join(".config").join("claude").join("projects"));
+            }
+            let mut files = Vec::new();
+            for d in dirs {
+                walk_files(&d, 4, "jsonl", &mut files);
+            }
+            let mut today = 0u64;
+            let mut total = 0u64;
+            for f in files {
+                let Ok(text) = std::fs::read_to_string(&f) else { continue };
+                for line in text.lines() {
+                    if !line.contains("\"usage\"") {
+                        continue;
+                    }
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+                    let Some(u) = v.pointer("/message/usage").or_else(|| v.get("usage")) else { continue };
+                    let tok = u.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
+                        + u.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
+                        + u.get("cache_creation_input_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
+                        + u.get("cache_read_input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+                    total = total.saturating_add(tok);
+                    let is_today = v
+                        .get("timestamp")
+                        .and_then(|x| x.as_str())
+                        .and_then(parse_iso_secs)
+                        .map(|ts| now.saturating_sub(ts) < 86400)
+                        .unwrap_or(false);
+                    if is_today {
+                        today = today.saturating_add(tok);
+                    }
+                }
+            }
+            format_token_summary(today, total, None)
+        }
+        "antigravity" => {
+            let mut today = 0u64;
+            let mut total = 0u64;
+            if let Some(brain) = dirs::home_dir().map(|h| h.join(".gemini").join("antigravity-cli").join("brain")) {
+                if let Ok(rd) = std::fs::read_dir(brain) {
+                    for e in rd.flatten() {
+                        let log = e.path().join(".system_generated").join("logs").join("transcript.jsonl");
+                        let Ok(text) = std::fs::read_to_string(&log) else { continue };
+                        for line in text.lines() {
+                            if !line.contains("input_tokens") && !line.contains("output_tokens") {
+                                continue;
+                            }
+                            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+                            let tok = v.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
+                                + v.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
+                                + v.get("cache_read_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+                            total = total.saturating_add(tok);
+                            let is_today = v
+                                .get("created_at")
+                                .and_then(|x| x.as_str())
+                                .and_then(parse_iso_secs)
+                                .map(|ts| now.saturating_sub(ts) < 86400)
+                                .unwrap_or(false);
+                            if is_today {
+                                today = today.saturating_add(tok);
+                            }
+                        }
+                    }
+                }
+            }
+            format_token_summary(today, total, None)
+        }
+        "codex-cli" => {
+            let (rate, today, total) = codex_local_stats();
+            format_token_summary(today, total, rate.as_deref())
+        }
+        "gemini-cli" => {
+            let mut files = Vec::new();
+            if let Some(tmp) = dirs::home_dir().map(|h| h.join(".gemini").join("tmp")) {
+                walk_files(&tmp, 4, "json", &mut files);
+            }
+            let mut today = 0u64;
+            let mut total = 0u64;
+            for f in files {
+                let recent_file = std::fs::metadata(&f)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+                    .map(|d| d.as_secs() < 86400)
+                    .unwrap_or(false);
+                let Ok(text) = std::fs::read_to_string(&f) else { continue };
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+                let Some(msgs) = v.get("messages").and_then(|x| x.as_array()) else { continue };
+                for m in msgs {
+                    let Some(t) = m.get("tokens") else { continue };
+                    let tok = t.get("total").and_then(|x| x.as_u64()).unwrap_or_else(|| {
+                        t.get("input").and_then(|x| x.as_u64()).unwrap_or(0)
+                            + t.get("output").and_then(|x| x.as_u64()).unwrap_or(0)
+                            + t.get("cached").and_then(|x| x.as_u64()).unwrap_or(0)
+                    });
+                    total = total.saturating_add(tok);
+                    if recent_file {
+                        today = today.saturating_add(tok);
+                    }
+                }
+            }
+            format_token_summary(today, total, None)
+        }
+        _ => (String::from("—"), String::new()),
+    }
+}
+
+/// コマンドの標準出力（`ccusage --json` の JSON またはプレーンテキスト）を表示用に整える
+fn format_usage_output(raw: &str, tool_id: &str) -> (String, String) {
+    let trimmed = raw.trim();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(totals) = v.get("totals") {
+            let total_tokens = totals.get("totalTokens").and_then(|x| x.as_u64()).unwrap_or(0);
+            let total_cost = totals.get("totalCost").and_then(|x| x.as_f64());
+            let last_day = v.get("daily").and_then(|d| d.as_array()).and_then(|a| a.last());
+            let day_tokens = last_day.and_then(|d| d.get("totalTokens")).and_then(|x| x.as_u64()).unwrap_or(0);
+            let day_cost = last_day.and_then(|d| d.get("totalCost")).and_then(|x| x.as_f64());
+            let day_date = last_day.and_then(|d| d.get("date")).and_then(|x| x.as_str()).unwrap_or("");
+            let short = match (day_cost, total_cost) {
+                (Some(dc), Some(tc)) if tc > 0.0 => {
+                    let dt = fmt_tokens(day_tokens);
+                    tr!(
+                        "${dc:.2} ({dt}) / 計 ${tc:.2}",
+                        "${dc:.2} ({dt}) / Total ${tc:.2}",
+                        "${dc:.2} ({dt}) / 共 ${tc:.2}"
+                    )
+                }
+                _ => {
+                    let dt = fmt_tokens(day_tokens);
+                    let tt = fmt_tokens(total_tokens);
+                    tr!("直近 {dt} / 計 {tt} tok", "Latest {dt} / Total {tt} tok", "最近 {dt} / 共 {tt} tok")
+                }
+            };
+            let detail = match (day_cost, total_cost) {
+                (Some(dc), Some(tc)) => format!(
+                    "{}: ${dc:.2} ({} tok)\nTotal: ${tc:.2} ({} tok)",
+                    if day_date.is_empty() { "Latest" } else { day_date },
+                    fmt_tokens(day_tokens),
+                    fmt_tokens(total_tokens)
+                ),
+                _ => format!(
+                    "{}: {} tok\nTotal: {} tok",
+                    if day_date.is_empty() { "Latest" } else { day_date },
+                    fmt_tokens(day_tokens),
+                    fmt_tokens(total_tokens)
+                ),
+            };
+            if tool_id == "codex-cli" {
+                let (rate, _, _) = codex_local_stats();
+                if let Some(r) = rate {
+                    return (format!("{r} · {short}"), format!("{r}\n{detail}"));
+                }
+            }
+            return (short, detail);
+        }
+    }
+    let one_line = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (one_line, trimmed.to_string())
+}
+
+/// `mark-shell --ai-usage <tool_id>` として呼ばれたときの標準出力
+pub fn print_for_usage(tool_id: &str) {
+    let (short, _) = collect_local_usage(tool_id);
+    println!("{short}");
+}
+
 /// 子プロセスを上限時間つきで実行し、(成功したか, 標準出力, 標準エラー) を返す
 fn run_command_timeout(mut cmd: std::process::Command, timeout: std::time::Duration) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
     use std::io::Read;
@@ -539,8 +869,20 @@ pub async fn run_ai_usage(
             .filter(|s| !s.is_empty())
             .or_else(|| tool.as_ref().and_then(|t| t.usage_command.as_ref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
         let Some(raw_cmd) = raw_cmd else {
-            return UsageResult { id: tool_id, output: String::new(), error: None };
+            return UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: None };
         };
+        // `mark-shell --ai-usage <id>` は自分自身の集計処理を直接呼ぶ
+        if let Some(rest) = raw_cmd.strip_prefix("mark-shell --ai-usage") {
+            let target = rest.trim();
+            let (output, detail) = collect_local_usage(if target.is_empty() { &tool_id } else { target });
+            return UsageResult { id: tool_id, output, detail, error: None };
+        }
+        let is_default_cmd = serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS)
+            .ok()
+            .and_then(|f| f.tools.into_iter().find(|d| d.id == tool_id))
+            .and_then(|d| d.usage_command)
+            .as_deref()
+            == Some(raw_cmd.as_str());
         let is_cli = tool.as_ref().map(|t| t.kind == "cli").unwrap_or(true);
         let cmd = match (&wsl, is_cli) {
             (Some(w), true) => {
@@ -604,12 +946,14 @@ pub async fn run_ai_usage(
             Ok((status, stdout, stderr)) => {
                 let out = strip_ansi(&String::from_utf8_lossy(&stdout)).trim().to_string();
                 let err = strip_ansi(&String::from_utf8_lossy(&stderr)).trim().to_string();
-                if status.success() {
-                    UsageResult {
-                        id: tool_id,
-                        output: if out.is_empty() { err } else { out },
-                        error: None,
-                    }
+                if status.success() && (!out.is_empty() || !err.is_empty()) {
+                    let raw = if out.is_empty() { &err } else { &out };
+                    let (output, detail) = format_usage_output(raw, &tool_id);
+                    UsageResult { id: tool_id, output, detail, error: None }
+                } else if is_default_cmd {
+                    // プリセットのコマンド（npx ccusage など）が使えない環境・オフライン時はローカルログの集計にフォールバックする
+                    let (output, detail) = collect_local_usage(&tool_id);
+                    UsageResult { id: tool_id, output, detail, error: None }
                 } else {
                     let msg = if !err.is_empty() {
                         err
@@ -618,14 +962,18 @@ pub async fn run_ai_usage(
                     } else {
                         format!("exit {}", status.code().unwrap_or(-1))
                     };
-                    UsageResult { id: tool_id, output: String::new(), error: Some(msg) }
+                    UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: Some(msg) }
                 }
             }
-            Err(e) => UsageResult { id: tool_id, output: String::new(), error: Some(e) },
+            Err(_) if is_default_cmd => {
+                let (output, detail) = collect_local_usage(&tool_id);
+                UsageResult { id: tool_id, output, detail, error: None }
+            }
+            Err(e) => UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: Some(e) },
         }
     })
     .await
-    .unwrap_or_else(|e| UsageResult { id: String::new(), output: String::new(), error: Some(e.to_string()) })
+    .unwrap_or_else(|e| UsageResult { id: String::new(), output: String::new(), detail: String::new(), error: Some(e.to_string()) })
 }
 
 #[cfg(test)]
@@ -685,8 +1033,15 @@ mod tests {
     #[test]
     fn strip_ansi_and_usage_command() {
         assert_eq!(strip_ansi("\x1b[32m50%\x1b[0m ($2.10)"), "50% ($2.10)");
-        let json = r#"{"tools":[{"id":"claude-code","name":"Claude Code","usageCommand":"ccusage"}]}"#;
-        let f: ToolsFile = serde_json::from_str(json).unwrap();
-        assert_eq!(f.tools[0].usage_command.as_deref(), Some("ccusage"));
+        let f: ToolsFile = serde_json::from_str(DEFAULT_TOOLS).unwrap();
+        for t in &f.tools {
+            assert!(t.usage_command.as_deref().is_some_and(|s| !s.is_empty()));
+        }
+        let ccusage_json = r#"{"daily":[{"date":"2026-11-18","totalTokens":142161,"totalCost":0.45}],"totals":{"totalTokens":1421610,"totalCost":12.30}}"#;
+        let (short, detail) = format_usage_output(ccusage_json, "claude-code");
+        assert!(short.contains("$0.45"));
+        assert!(short.contains("142.2K"));
+        assert!(short.contains("$12.30"));
+        assert!(detail.contains("2026-11-18"));
     }
 }
