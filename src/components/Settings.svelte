@@ -5,7 +5,7 @@
   import { api, errorMessage } from '../lib/api';
   import { EDITOR_FONT, TERMINAL_FONT, type Config } from '../lib/config';
   import { COLOR_KEYS, DEFAULT_FONTS, FONT_SUGGESTIONS, PRESETS, colorLabel, fontStack, presetFor, presetLabel, resolveTheme, type ColorKey } from '../lib/themes';
-  import { LANGUAGE_LABELS, tr, type LanguageSetting } from '../lib/i18n.svelte';
+  import { LANGUAGE_LABELS, isMac, tr, type LanguageSetting } from '../lib/i18n.svelte';
   import Icon from './Icon.svelte';
 
   const languages = Object.entries(LANGUAGE_LABELS) as [LanguageSetting, string][];
@@ -85,11 +85,17 @@
       await store.updateConfig({ cliCommand });
       store.toast(
         cliCommand
-          ? tr(
-              'コマンド mark-shell を PATH に追加しました。新しく開いた端末（WSL・PowerShell など）で「mark-shell フォルダ」のように使えます',
-              'Added the mark-shell command to PATH. In a newly opened terminal (WSL, PowerShell, etc.) run "mark-shell <folder>"',
-              '已将 mark-shell 命令添加到 PATH。在新打开的终端（WSL、PowerShell 等）中运行“mark-shell 文件夹”',
-            )
+          ? isMac
+            ? tr(
+                'コマンド mark-shell を PATH に追加しました。新しく開いたターミナルで「mark-shell フォルダ」のように使えます',
+                'Added the mark-shell command to PATH. In a newly opened terminal, run "mark-shell <folder>"',
+                '已将 mark-shell 命令添加到 PATH。在新打开的终端中运行“mark-shell 文件夹”',
+              )
+            : tr(
+                'コマンド mark-shell を PATH に追加しました。新しく開いた端末（WSL・PowerShell など）で「mark-shell フォルダ」のように使えます',
+                'Added the mark-shell command to PATH. In a newly opened terminal (WSL, PowerShell, etc.) run "mark-shell <folder>"',
+                '已将 mark-shell 命令添加到 PATH。在新打开的终端（WSL、PowerShell 等）中运行“mark-shell 文件夹”',
+              )
           : tr('コマンド mark-shell を PATH から外しました', 'Removed the mark-shell command from PATH', '已从 PATH 中移除 mark-shell 命令'),
       );
     } catch (e) {
@@ -136,7 +142,7 @@
         <h3>{tr('配色', 'Colors', '配色')}</h3>
         <label>{tr('配色', 'Color theme', '配色方案')}
           <select bind:value={draft.theme} onchange={onThemeChange}>
-            <option value="system">{tr('Windows の設定に合わせる（ライト / ダーク）', 'Match Windows (light / dark)', '跟随 Windows 设置（浅色 / 深色）')}</option>
+            <option value="system">{isMac ? tr('OS の設定に合わせる（ライト / ダーク）', 'Match system (light / dark)', '跟随系统设置（浅色 / 深色）') : tr('Windows の設定に合わせる（ライト / ダーク）', 'Match Windows (light / dark)', '跟随 Windows 设置（浅色 / 深色）')}</option>
             {#each Object.keys(PRESETS) as id (id)}
               <option value={id}>{presetLabel(id)}</option>
             {/each}
@@ -260,7 +266,7 @@
         <h3>Git</h3>
         <label class="check"><input type="checkbox" bind:checked={draft.gitEnabled} /> {tr('Git 連携を使う', 'Enable Git integration', '启用 Git 集成')}</label>
         <label>{tr('git の場所（空なら自動）', 'Path to git (empty for auto)', 'git 路径（留空则自动）')}
-          <input type="text" bind:value={draft.gitPath} placeholder="C:\Program Files\Git\cmd\git.exe" spellcheck="false" />
+          <input type="text" bind:value={draft.gitPath} placeholder={isMac ? '/usr/bin/git' : 'C:\\Program Files\\Git\\cmd\\git.exe'} spellcheck="false" />
         </label>
         <label class="check"><input type="checkbox" bind:checked={draft.gitAutoFetch} /> {tr('自動でフェッチする（ウィンドウが前面にあるとき）', 'Fetch automatically (while the window is active)', '自动获取（窗口处于前台时）')}</label>
         {#if draft.gitAutoFetch}
@@ -291,7 +297,7 @@
         <h3>{tr('ターミナル', 'Terminal', '终端')}</h3>
         <label>{tr('既定のシェル', 'Default shell', '默认 Shell')}
           <select bind:value={draft.terminal.defaultShell}>
-            <option value="">{tr('自動（PowerShell）', 'Auto (PowerShell)', '自动（PowerShell）')}</option>
+            <option value="">{isMac ? tr('自動（ログインシェル）', 'Auto (login shell)', '自动（登录 Shell）') : tr('自動（PowerShell）', 'Auto (PowerShell)', '自动（PowerShell）')}</option>
             {#each store.shells as s (s.id)}
               <option value={s.id}>{s.name}</option>
             {/each}
@@ -312,7 +318,7 @@
       </section>
 
       <section>
-        <h3>{tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
+        <h3>{isMac ? tr('AI ツールとコマンド', 'AI tools and command', 'AI 工具与命令') : tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
         <p class="note">
           {tr(
             'AI ツールの定義（コマンド名・起動方法・メニュー）は設定ファイルで追加・変更できます。',
@@ -325,15 +331,19 @@
           <button class="btn" onclick={() => void store.refreshAiTools()}>{tr('AI ツールを探し直す', 'Rescan AI tools', '重新查找 AI 工具')}</button>
         </div>
         <div class="row">
-          <button class="btn" onclick={toggleExplorerMenu}>
-            {explorerMenu
-              ? tr('エクスプローラーの右クリックメニューから外す', 'Remove from Explorer context menu', '从资源管理器右键菜单中移除')
-              : tr('エクスプローラーの右クリックメニューに追加', 'Add to Explorer context menu', '添加到资源管理器右键菜单')}
-          </button>
+          {#if !isMac}
+            <button class="btn" onclick={toggleExplorerMenu}>
+              {explorerMenu
+                ? tr('エクスプローラーの右クリックメニューから外す', 'Remove from Explorer context menu', '从资源管理器右键菜单中移除')
+                : tr('エクスプローラーの右クリックメニューに追加', 'Add to Explorer context menu', '添加到资源管理器右键菜单')}
+            </button>
+          {/if}
           <button class="btn" onclick={toggleCliCommand}>
             {cliCommand
               ? tr('コマンド mark-shell を PATH から外す', 'Remove mark-shell command from PATH', '从 PATH 中移除 mark-shell 命令')
-              : tr('コマンド mark-shell を PATH に追加（WSL などから起動）', 'Add mark-shell command to PATH (launch from WSL, etc.)', '将 mark-shell 命令添加到 PATH（从 WSL 等启动）')}
+              : isMac
+                ? tr('コマンド mark-shell を PATH に追加（ターミナルから起動）', 'Add mark-shell command to PATH (launch from terminal)', '将 mark-shell 命令添加到 PATH（从终端启动）')
+                : tr('コマンド mark-shell を PATH に追加（WSL などから起動）', 'Add mark-shell command to PATH (launch from WSL, etc.)', '将 mark-shell 命令添加到 PATH（从 WSL 等启动）')}
           </button>
         </div>
       </section>

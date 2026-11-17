@@ -41,15 +41,38 @@ fn local_git() -> Option<PathBuf> {
         let p = PathBuf::from(configured);
         return p.is_file().then_some(p);
     }
-    which::which("git").ok()
+    if let Ok(p) = which::which("git") {
+        return Some(p);
+    }
+    #[cfg(not(windows))]
+    {
+        for p in ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"] {
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
 }
 
 fn not_found() -> String {
-    tr!(
-        "git が見つかりません。Git for Windows（https://git-scm.com/）をインストールしてください",
-        "git was not found. Please install Git for Windows (https://git-scm.com/)",
-        "找不到 git。请安装 Git for Windows（https://git-scm.com/）"
-    )
+    #[cfg(windows)]
+    {
+        tr!(
+            "git が見つかりません。Git for Windows（https://git-scm.com/）をインストールしてください",
+            "git was not found. Please install Git for Windows (https://git-scm.com/)",
+            "找不到 git。请安装 Git for Windows（https://git-scm.com/）"
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        tr!(
+            "git が見つかりません。Xcode コマンドラインツール（xcode-select --install）または Git（https://git-scm.com/）をインストールしてください",
+            "git was not found. Please install the Xcode Command Line Tools (xcode-select --install) or Git (https://git-scm.com/)",
+            "找不到 git。请安装 Xcode 命令行工具（xcode-select --install）或 Git（https://git-scm.com/）"
+        )
+    }
 }
 
 fn exec_for(app: &AppHandle) -> Result<Exec, String> {

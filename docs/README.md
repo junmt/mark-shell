@@ -1,6 +1,6 @@
 # mark-shell 仕様書
 
-mark-shell は Windows 向けのデスクトップアプリです。指定したディレクトリの中の Markdown ファイルを左ペインのツリーで一覧し、右ペインで編集・表示します。同じ画面のシェルから AI（Claude Code、Antigravity など）を呼び出せます。
+mark-shell は Windows・Mac 向けのデスクトップアプリです。指定したディレクトリの中の Markdown ファイルを左ペインのツリーで一覧し、右ペインで編集・表示します。同じ画面のシェルから AI（Claude Code、Antigravity など）を呼び出せます。
 
 ## ドキュメント一覧
 

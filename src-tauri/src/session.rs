@@ -63,6 +63,7 @@ pub fn mark_closed() {
 }
 
 /// pid のプロセスが動いている mark-shell か（pid が別のプロセスに使い回されていても誤らないよう、実行ファイル名も比べる）
+#[cfg(windows)]
 fn is_running_mark_shell(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
@@ -87,6 +88,29 @@ fn is_running_mark_shell(pid: u32) -> bool {
         CloseHandle(h);
         alive && name.is_some() && name == own_name
     }
+}
+
+#[cfg(not(windows))]
+fn is_running_mark_shell(pid: u32) -> bool {
+    let own_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()))
+        .unwrap_or_else(|| "mark-shell".into());
+    let Ok(out) = std::process::Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    let comm = String::from_utf8_lossy(&out.stdout);
+    let comm = comm.trim();
+    Path::new(comm)
+        .file_name()
+        .map(|n| n.to_string_lossy().eq_ignore_ascii_case(&own_name))
+        .unwrap_or(false)
 }
 
 /// 閉じたウィンドウ（root, 閉じた時刻）から、まとめて復元するものを選ぶ。最後に閉じたものが先頭

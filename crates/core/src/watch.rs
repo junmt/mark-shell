@@ -1,6 +1,6 @@
 //! ルートディレクトリ以下の変更の監視。少しの間に起きた変更をまとめて渡す
 //!
-//! Windows では notify（ReadDirectoryChangesW）を使う。Linux（WSL のエージェント）では inotify を直接使う
+//! Windows と Mac では notify（ReadDirectoryChangesW / FSEvents）を使う。Linux（WSL のエージェント）では inotify を直接使う
 //! （[`watch_inotify.rs`](self)）。notify 8 は inotify の監視に OPEN を含めるので、大きなフォルダを探索すると
 //! フォルダを開いたイベントでキューが溢れ、探索のやり直しが止まらなくなるため。
 
@@ -60,6 +60,9 @@ mod notify_watch {
         filter: Arc<FilterConfig>,
         on_event: impl Fn(WatchEvent) + Send + 'static,
     ) -> notify::Result<Watcher> {
+        // Mac の FSEvents はシンボリックリンクを解決したパス（/private/var/... など）で通知するため、ルートも合わせておく
+        #[cfg(target_os = "macos")]
+        let root = root.canonicalize().unwrap_or(root);
         let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
         let mut watcher = notify::recommended_watcher(move |res| {
             let _ = tx.send(res);
@@ -108,7 +111,12 @@ mod notify_watch {
             }
             EventKind::Remove(_) => {
                 for p in &ev.paths {
-                    removed(root, p, out);
+                    // Mac の FSEvents では一時ファイルからの上書き保存（rename）でも Remove が届くことがあるため、残っていれば更新として扱う
+                    if p.exists() {
+                        present(root, filter, p, out);
+                    } else {
+                        removed(root, p, out);
+                    }
                 }
             }
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {

@@ -16,7 +16,15 @@ const DEFAULT_TOOLS: &str = r#"{
       "id": "claude-code",
       "name": "Claude Code",
       "kind": "cli",
-      "detect": { "command": "claude", "paths": ["%USERPROFILE%\\.local\\bin\\claude.exe"] },
+      "detect": {
+        "command": "claude",
+        "paths": [
+          "%USERPROFILE%\\.local\\bin\\claude.exe",
+          "~/.local/bin/claude",
+          "/opt/homebrew/bin/claude",
+          "/usr/local/bin/claude"
+        ]
+      },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://docs.claude.com/en/docs/claude-code/setup",
       "actions": [
@@ -29,7 +37,7 @@ const DEFAULT_TOOLS: &str = r#"{
       "id": "gemini-cli",
       "name": "Gemini CLI",
       "kind": "cli",
-      "detect": { "command": "gemini" },
+      "detect": { "command": "gemini", "paths": ["/opt/homebrew/bin/gemini", "/usr/local/bin/gemini", "~/.local/bin/gemini"] },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://github.com/google-gemini/gemini-cli",
       "actions": [
@@ -40,7 +48,7 @@ const DEFAULT_TOOLS: &str = r#"{
       "id": "codex-cli",
       "name": "Codex CLI",
       "kind": "cli",
-      "detect": { "command": "codex" },
+      "detect": { "command": "codex", "paths": ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "~/.local/bin/codex"] },
       "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://github.com/openai/codex",
       "actions": [
@@ -53,7 +61,12 @@ const DEFAULT_TOOLS: &str = r#"{
       "kind": "ide",
       "detect": {
         "command": "antigravity",
-        "paths": ["%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe", "%ProgramFiles%\\Antigravity\\Antigravity.exe"]
+        "paths": [
+          "%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe",
+          "%ProgramFiles%\\Antigravity\\Antigravity.exe",
+          "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity",
+          "/Applications/Antigravity.app/Contents/MacOS/Antigravity"
+        ]
       },
       "launch": { "args": ["${root}"], "detached": true },
       "installUrl": "https://antigravity.google/",
@@ -199,10 +212,19 @@ fn load() -> Vec<ToolDef> {
         .unwrap_or_default()
 }
 
-/// `%NAME%` 形式の環境変数を展開する
+/// `%NAME%` 形式の環境変数と先頭の `~` を展開する
 fn expand_env(s: &str) -> String {
+    let expanded_tilde = if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix(r"~\")) {
+        if let Some(home) = dirs::home_dir() {
+            home.join(rest).to_string_lossy().into_owned()
+        } else {
+            s.to_string()
+        }
+    } else {
+        s.to_string()
+    };
     let mut out = String::new();
-    let mut rest = s;
+    let mut rest = expanded_tilde.as_str();
     while let Some(i) = rest.find('%') {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
@@ -222,9 +244,31 @@ fn expand_env(s: &str) -> String {
     out
 }
 
+/// コマンド名から実行ファイルを探す。Mac で Finder / Dock から起動したときは PATH が最小限なので、よく使われる場所も見る
+fn which_command(cmd: &str) -> Option<PathBuf> {
+    if let Ok(p) = which::which(cmd) {
+        return Some(p);
+    }
+    #[cfg(not(windows))]
+    {
+        let mut dirs = vec![PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")];
+        if let Some(home) = dirs::home_dir() {
+            dirs.insert(0, home.join(".local/bin"));
+            dirs.push(home.join(".cargo/bin"));
+        }
+        for d in dirs {
+            let p = d.join(cmd);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 fn detect(tool: &ToolDef) -> Option<PathBuf> {
     if let Some(cmd) = &tool.detect.command {
-        if let Ok(p) = which::which(cmd) {
+        if let Some(p) = which_command(cmd) {
             return Some(p);
         }
     }
@@ -254,7 +298,7 @@ pub fn find_in_wsl(tool: &ToolDef, wsl: &crate::wsl::WslRoot) -> Option<String> 
 pub fn find(id: &str) -> Result<(ToolDef, PathBuf), String> {
     let tool = get(id)?;
     let path = match &tool.launch.command {
-        Some(c) => which::which(c).ok().or_else(|| Some(PathBuf::from(expand_env(c)))).filter(|p| p.exists()),
+        Some(c) => which_command(c).or_else(|| Some(PathBuf::from(expand_env(c))).filter(|p| p.exists())),
         None => detect(&tool),
     }
     .ok_or_else(|| {
@@ -325,6 +369,7 @@ pub fn args_for(tool: &ToolDef, action: Option<&str>, vars: &Vars) -> Result<Vec
 }
 
 /// PowerShell の単一引用符文字列（中身はそのまま渡る）
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
@@ -367,16 +412,18 @@ pub fn launch_ide_tool(
     action_id: Option<String>,
     note: Option<String>,
 ) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     let root = state.root()?;
     let (tool, path) = find(&tool_id)?;
     let vars = Vars::new(&root, note.as_deref(), None);
     let args = args_for(&tool, action_id.as_deref(), &vars)?;
-    std::process::Command::new(&path)
-        .args(&args)
-        .current_dir(&root)
-        .creation_flags(0x0800_0000 | 0x0000_0008) // CREATE_NO_WINDOW | DETACHED_PROCESS
-        .spawn()
+    let mut cmd = std::process::Command::new(&path);
+    cmd.args(&args).current_dir(&root);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000 | 0x0000_0008); // CREATE_NO_WINDOW | DETACHED_PROCESS
+    }
+    cmd.spawn()
         .map(|_| ())
         .map_err(|e| {
             let name = &tool.name;

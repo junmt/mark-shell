@@ -26,8 +26,17 @@ export function resolveLocale(setting: string | undefined, language?: string): L
   return setting === 'ja' || setting === 'en' || setting === 'zh' ? setting : detectLocale(language);
 }
 
+/** Mac で動いているか */
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+
+/** ショートカット表記を OS に合わせる（Mac では Ctrl → Cmd、Alt → Option） */
+export function sc(s: string): string {
+  return isMac ? s.replace(/\bCtrl\+/g, 'Cmd+').replace(/\bAlt\+/g, 'Option+') : s;
+}
+
 /** 今の言語の文言を選ぶ */
 export function tr(ja: string, en: string, zh: string): string {
   const l = i18n.locale;
-  return l === 'ja' ? ja : l === 'zh' ? zh : en;
+  const s = l === 'ja' ? ja : l === 'zh' ? zh : en;
+  return isMac ? sc(s) : s;
 }

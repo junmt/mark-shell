@@ -4,20 +4,20 @@
 
 | 層 | 採用技術 | 理由 |
 | --- | --- | --- |
-| アプリ基盤 | Tauri 2（Rust ＋ WebView2） | Electron より配布サイズとメモリが小さい。WebView2 は Windows 11 に標準搭載（Windows 10 はインストーラーで導入） |
+| アプリ基盤 | Tauri 2（Rust ＋ WebView2 / WKWebView） | Electron より配布サイズとメモリが小さい。Windows は WebView2、Mac は標準の WKWebView を使う |
 | UI | TypeScript ＋ Svelte | 軽量。画面の数が少ないので十分 |
 | エディタ | CodeMirror 6 | Markdown モード、IME 対応、大きなファイルでも速い |
 | Markdown 描画 | unified（remark / rehype）＋ remark-gfm ＋ remark-math | GFM 準拠、プラグインで拡張しやすい |
 | コードハイライト | Shiki | VS Code と同じ文法定義で高品質 |
 | 数式 / 図 | KaTeX / Mermaid | すべて同梱し、オフラインで動かす |
 | サニタイズ | DOMPurify | プレビューの XSS 対策 |
-| ターミナル | xterm.js（UI）＋ portable-pty（Rust、ConPTY） | Windows ネイティブの疑似端末で PowerShell や CLI ツールが正しく動く |
+| ターミナル | xterm.js（UI）＋ portable-pty（Rust、ConPTY / PTY） | OS ネイティブの疑似端末でシェルや CLI ツールが正しく動く |
 | ディレクトリ探索 | ignore（Rust、ripgrep のライブラリ） | 並列での再帰探索 |
 | 全文検索 | grep-searcher / grep-regex（Rust、ripgrep のライブラリ） | インデックスなしで高速に走査できる |
-| ファイル監視 | notify（Rust） | ReadDirectoryChangesW を使う。WSL のエージェントは inotify を直接使う |
+| ファイル監視 | notify（Rust） | Windows は ReadDirectoryChangesW、Mac は FSEvents を使う。WSL のエージェントは inotify を直接使う |
 | Git | PC にインストール済みの `git`（子プロセス） | ユーザーの設定・認証・フックがそのまま効く。ライブラリ（libgit2 など）は資格情報ヘルパーや署名との互換が不十分なので使わない |
 | 差分 | `git diff` の結果 ＋ CodeMirror の merge 拡張（@codemirror/merge） | 左右・行内の差分表示とハンク単位の操作 |
-| インストーラー | WiX（MSI）/ NSIS | Tauri の標準機能 |
+| インストーラー | WiX（MSI）/ NSIS（Windows）、DMG（Mac） | Tauri の標準機能 |
 | 自動更新 | Tauri updater（署名つき） | オフライン時は何もしない |
 
 データベース（SQLite、検索インデックスなど）は使わない。

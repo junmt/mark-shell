@@ -110,6 +110,6 @@ export function mergeConfig(raw: Record<string, unknown> | null | undefined): Co
 }
 
 export const EDITOR_FONT =
-  "'Cascadia Mono', 'BIZ UDGothic', 'MS Gothic', Consolas, monospace";
-export const UI_FONT = "'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
-export const TERMINAL_FONT = "'Cascadia Mono', 'BIZ UDGothic', 'MS Gothic', Consolas, monospace";
+  "'Cascadia Mono', 'SF Mono', Menlo, 'BIZ UDGothic', 'Hiragino Sans', 'MS Gothic', Consolas, monospace";
+export const UI_FONT = "'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif";
+export const TERMINAL_FONT = "'Cascadia Mono', 'SF Mono', Menlo, 'BIZ UDGothic', 'Hiragino Sans', 'MS Gothic', Consolas, monospace";

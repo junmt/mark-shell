@@ -144,17 +144,32 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
                     c.args(&args);
                     c
                 } else {
-                    // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
-                    // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
-                    let ps = shells::powershell()
-                        .ok_or_else(|| tr!("PowerShell が見つかりません", "PowerShell was not found", "找不到 PowerShell"))?;
-                    let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
-                        .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let mut c = CommandBuilder::new(&ps.program);
-                    c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
-                    c
+                    #[cfg(windows)]
+                    {
+                        // PowerShell 経由で起動する。.cmd / .ps1 の起動スクリプトもそのまま動き、
+                        // 終了後もシェルが残る。引数は単一引用符で囲むので、そのまま渡る
+                        let ps = shells::powershell()
+                            .ok_or_else(|| tr!("PowerShell が見つかりません", "PowerShell was not found", "找不到 PowerShell"))?;
+                        let line = std::iter::once(format!("& {}", ai_tools::ps_quote(&path.to_string_lossy())))
+                            .chain(args.iter().map(|a| ai_tools::ps_quote(a)))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let mut c = CommandBuilder::new(&ps.program);
+                        c.args(["-NoLogo", "-NoExit", "-Command", &format!("{}; {line}", PS_INIT)]);
+                        c
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        // ログインシェル経由で起動し、ツールが終わったらそのままシェルに残る
+                        let user_shell = shells::find(None)
+                            .map(|s| s.program.to_string_lossy().into_owned())
+                            .or_else(|| std::env::var("SHELL").ok())
+                            .unwrap_or_else(|| "/bin/zsh".into());
+                        let mut c = CommandBuilder::new(&user_shell);
+                        c.args(["-lc", "\"$@\"; exec \"$0\" -l", &user_shell, &path.to_string_lossy()]);
+                        c.args(&args);
+                        c
+                    }
                 };
                 cmd.cwd(tool_cwd.unwrap_or_else(|| cwd.clone()));
                 (cmd, tool.name, false)
@@ -198,6 +213,13 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     cmd.env("MARKSHELL_CONTEXT_FILE", ai_context::context_file().to_string_lossy().as_ref());
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "mark-shell");
+    #[cfg(not(windows))]
+    {
+        cmd.env("TERM", "xterm-256color");
+        if std::env::var("LANG").map(|l| !l.to_uppercase().contains("UTF-8") && !l.to_uppercase().contains("UTF8")).unwrap_or(true) {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
+    }
 
     let pair = native_pty_system()
         .openpty(PtySize { rows: req.rows.max(2), cols: req.cols.max(10), pixel_width: 0, pixel_height: 0 })
@@ -258,6 +280,7 @@ pub fn pty_spawn(app: AppHandle, state: State<'_, AppState>, req: SpawnRequest, 
     Ok(SpawnResult { id, title })
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 const PS_INIT: &str = "[Console]::OutputEncoding=[Console]::InputEncoding=[System.Text.Encoding]::UTF8";
 
 #[tauri::command]

@@ -479,20 +479,37 @@ pub fn absolute_path(state: State<'_, AppState>, path: String) -> Result<String,
 
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     let root = state.root()?;
     let p = resolve(&root, &path)?;
-    let mut cmd = std::process::Command::new("explorer.exe");
-    if path.is_empty() {
-        cmd.arg(&p);
-    } else {
-        // explorer.exe は /select,"パス" を 1 つの引数として受け取る
-        cmd.raw_arg(format!("/select,\"{}\"", p.display()));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("explorer.exe");
+        if path.is_empty() {
+            cmd.arg(&p);
+        } else {
+            // explorer.exe は /select,"パス" を 1 つの引数として受け取る
+            cmd.raw_arg(format!("/select,\"{}\"", p.display()));
+        }
+        return cmd.spawn().map(|_| ()).map_err(|e| e.to_string());
     }
-    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = std::process::Command::new("open");
+        if !path.is_empty() {
+            cmd.arg("-R");
+        }
+        cmd.arg(&p);
+        return cmd.spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        let dir = if path.is_empty() { p.as_path() } else { p.parent().unwrap_or(p.as_path()) };
+        return std::process::Command::new("xdg-open").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
 }
 
-/// 画像や Office のファイルなど、エディタで開けないファイルを Windows の既定のアプリで開く
+/// 画像や Office のファイルなど、エディタで開けないファイルを OS の既定のアプリで開く
 #[tauri::command]
 pub fn open_with_default_app(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let root = state.root()?;
@@ -500,14 +517,28 @@ pub fn open_with_default_app(state: State<'_, AppState>, path: String) -> Result
     tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))
 }
 
-/// インストーラーで入れたものか（隣にアンインストーラーがある）。
+/// 自動アップデートできる形で入っているか（Windows はインストーラー版、Mac は .app バンドル）。
 /// 単体実行版（*-portable.exe）は自動アップデートできないので、画面側でリリースのページに案内する
 #[tauri::command]
 pub fn is_installed() -> bool {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("uninstall.exe").exists()))
-        .unwrap_or(false)
+    #[cfg(windows)]
+    {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("uninstall.exe").exists()))
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::current_exe()
+            .ok()
+            .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+            .unwrap_or(false)
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        false
+    }
 }
 
 /// 別のフォルダを新しいウィンドウ（別プロセス）で開く

@@ -2,7 +2,7 @@
   import { git } from '../lib/git.svelte';
   import { pathTreeRows, sectionCode, type FileStatus, type PathTreeRow, type Section } from '../lib/git';
   import { store, type MenuItem } from '../lib/store.svelte';
-  import { tr } from '../lib/i18n.svelte';
+  import { isMac, tr } from '../lib/i18n.svelte';
   import { basename, dirname } from '../lib/paths';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import Icon from './Icon.svelte';
@@ -119,7 +119,7 @@
 
   function messageKey(e: KeyboardEvent) {
     const ta = e.currentTarget as HTMLTextAreaElement;
-    if (e.key === 'Enter' && e.ctrlKey) {
+    if (e.key === 'Enter' && (e.ctrlKey || (isMac && e.metaKey))) {
       e.preventDefault();
       void git.commit();
     } else if ((e.key === 'ArrowUp' && ta.selectionStart === 0) || (e.key === 'ArrowDown' && ta.selectionEnd === ta.value.length)) {
@@ -149,7 +149,7 @@
     <div class="empty">
       <p>{tr('git が見つかりません。', 'git was not found.', '找不到 git。')}</p>
       {#if git.info.error}<p class="muted small">{git.info.error}</p>{/if}
-      {#if !store.wsl}
+      {#if !store.wsl && !isMac}
         <button class="link" onclick={() => void openUrl('https://git-scm.com/download/win')}>{tr('Git for Windows を入手する', 'Get Git for Windows', '获取 Git for Windows')}</button>
       {/if}
     </div>

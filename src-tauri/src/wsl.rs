@@ -9,7 +9,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -22,6 +21,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::paths::normalize_rel;
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(has_wsl_agent)]
@@ -55,7 +55,12 @@ pub fn wsl_exe() -> PathBuf {
 
 fn wsl_command(distro: &str) -> Command {
     let mut c = Command::new(wsl_exe());
-    c.args(["-d", distro, "--exec"]).creation_flags(CREATE_NO_WINDOW);
+    c.args(["-d", distro, "--exec"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
     c
 }
 

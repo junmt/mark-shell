@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { store } from '../lib/store.svelte';
   import { api } from '../lib/api';
-  import { tr } from '../lib/i18n.svelte';
+  import { sc, tr } from '../lib/i18n.svelte';
   import { basename, dirname } from '../lib/paths';
   import { git } from '../lib/git.svelte';
   import { detectLanguage, languageNames, PLAIN_TEXT } from '../lib/editor';
@@ -214,7 +214,7 @@
         >
           <span class="label">{item.label}</span>
           {#if item.detail}<span class="detail">{item.detail}</span>{/if}
-          {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
+          {#if item.shortcut}<span class="shortcut">{sc(item.shortcut)}</span>{/if}
         </button>
       {:else}
         <div class="none">{tr('見つかりません', 'No results', '未找到')}</div>

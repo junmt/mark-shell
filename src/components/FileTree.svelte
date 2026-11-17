@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
-  import { tr } from '../lib/i18n.svelte';
+  import { isMac, tr } from '../lib/i18n.svelte';
   import { basename, dirname, isImage, isInside, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
   import Icon, { type IconName } from './Icon.svelte';
@@ -57,7 +57,7 @@
         { label: '', separator: true },
         { label: tr('名前の変更', 'Rename', '重命名'), shortcut: 'F2', action: () => void store.rename(node.path) },
         { label: tr('複製', 'Duplicate', '创建副本'), action: () => void store.duplicate(node.path) },
-        { label: tr('削除', 'Delete', '删除'), shortcut: 'Delete', action: () => void store.remove(node.path) },
+        { label: tr('削除', 'Delete', '删除'), shortcut: isMac ? '⌫' : 'Delete', action: () => void store.remove(node.path) },
         { label: '', separator: true },
         { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(node.path, false) },
         { label: tr('相対パスをコピー', 'Copy relative path', '复制相对路径'), action: () => void store.copyPath(node.path, true) },
@@ -84,7 +84,7 @@
     }
     items.push(
       { label: '', separator: true },
-      { label: tr('エクスプローラーで表示', 'Reveal in Explorer', '在资源管理器中显示'), action: () => void api.revealInExplorer(node?.path ?? '') },
+      { label: isMac ? tr('Finder で表示', 'Reveal in Finder', '在访达中显示') : tr('エクスプローラーで表示', 'Reveal in Explorer', '在资源管理器中显示'), action: () => void api.revealInExplorer(node?.path ?? '') },
       { label: tr('ここでターミナルを開く', 'Open terminal here', '在此处打开终端'), action: () => store.newTerminal({ cwd: dir }) },
       { label: '', separator: true },
       { label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), action: () => void store.rescan() },
@@ -135,7 +135,9 @@
         if (cur) void store.rename(cur.path);
         break;
       case 'Delete':
-        if (cur) void store.remove(cur.path);
+      case 'Backspace':
+        if (cur && (e.key === 'Delete' || isMac)) void store.remove(cur.path);
+        else return;
         break;
       default:
         return;

@@ -1,7 +1,7 @@
 {
   "name": "mark-shell",
   "private": true,
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "tauri": "tauri",
-    "agent": "cd crates/agent && cargo build --release --target x86_64-unknown-linux-musl"
+    "agent": "node -e \"if (process.platform === 'win32') require('child_process').execSync('cargo build --release --target x86_64-unknown-linux-musl', { cwd: 'crates/agent', stdio: 'inherit' })\""
   },
   "overrides": {
     "katex": "$katex"

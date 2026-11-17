@@ -422,7 +422,7 @@ class GitStore {
   }
 
   selectCommit(hash: string, e: MouseEvent) {
-    if (e.ctrlKey) {
+    if (e.ctrlKey || e.metaKey) {
       this.selectedCommits = this.selectedCommits.includes(hash) ? this.selectedCommits.filter((h) => h !== hash) : [...this.selectedCommits, hash];
     } else if (e.shiftKey && this.selectedCommits.length) {
       const hashes = this.log.map((c) => c.hash);

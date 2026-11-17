@@ -30,8 +30,49 @@ pub fn unregister_cli() {
     cli::unregister();
 }
 
+/// Mac で Finder / Dock から起動したときは PATH が最小限（/usr/bin:/bin など）なので、
+/// ログインシェルと標準の場所から PATH を補う（git・認証ヘルパー・フック・AI ツールが見つかるようにする）
+#[cfg(not(windows))]
+fn enrich_path() {
+    let mut dirs: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    if let Ok(out) = std::process::Command::new(&shell)
+        .args(["-ilc", "printf '%s' \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        if out.status.success() {
+            for p in String::from_utf8_lossy(&out.stdout).split(':').filter(|s| !s.is_empty()) {
+                if !dirs.iter().any(|d| d == p) {
+                    dirs.push(p.to_string());
+                }
+            }
+        }
+    }
+    let mut extra = vec!["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()];
+    if let Some(home) = dirs::home_dir() {
+        extra.insert(0, home.join(".local/bin").to_string_lossy().into_owned());
+        extra.push(home.join(".cargo/bin").to_string_lossy().into_owned());
+    }
+    for p in extra {
+        if !dirs.iter().any(|d| d == &p) {
+            dirs.push(p);
+        }
+    }
+    std::env::set_var("PATH", dirs.join(":"));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(windows))]
+    enrich_path();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())

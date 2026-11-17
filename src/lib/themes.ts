@@ -340,13 +340,16 @@ export function fontStack(name: string, fallback: string): string {
 }
 
 export const DEFAULT_FONTS = {
-  ui: "'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif",
-  preview: "'Segoe UI', 'Yu Gothic UI', 'Meiryo', 'BIZ UDPGothic', sans-serif",
+  ui: "'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif",
+  preview: "'Segoe UI', 'Yu Gothic UI', 'Meiryo', 'BIZ UDPGothic', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif",
 };
 
-/** フォント入力欄の候補（Windows に入っているもの・よく入れられるもの） */
+/** フォント入力欄の候補（Windows / Mac に入っているもの・よく入れられるもの） */
 export const FONT_SUGGESTIONS = {
   proportional: [
+    'Hiragino Sans',
+    'Hiragino Kaku Gothic ProN',
+    'Hiragino Mincho ProN',
     'Yu Gothic UI',
     'Yu Gothic',
     'Meiryo',
@@ -359,5 +362,5 @@ export const FONT_SUGGESTIONS = {
     'Noto Serif JP',
     'Segoe UI',
   ],
-  mono: ['Cascadia Mono', 'Cascadia Code', 'BIZ UDGothic', 'MS Gothic', 'Consolas', 'HackGen', 'PlemolJP', 'UDEV Gothic'],
+  mono: ['SF Mono', 'Menlo', 'Monaco', 'Cascadia Mono', 'Cascadia Code', 'BIZ UDGothic', 'MS Gothic', 'Consolas', 'HackGen', 'PlemolJP', 'UDEV Gothic'],
 };

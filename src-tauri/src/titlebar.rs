@@ -1,6 +1,7 @@
 //! ウィンドウのタイトルバー（Windows の枠）の色。開いているフォルダの .vscode/settings.json の
-//! workbench.colorCustomizations（titleBar.*）に合わせる。Windows 11 の DWM の機能で、Windows 10 では何も起きない
+//! workbench.colorCustomizations（titleBar.*）に合わせる。Windows 11 の DWM の機能で、Windows 10 や Mac では何も起きない
 
+#[cfg(windows)]
 use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR};
 
 /// 既定の色に戻す値（DWMWA_COLOR_DEFAULT）
@@ -20,14 +21,20 @@ fn colorref(hex: Option<&str>) -> u32 {
 /// タイトルバーの背景と文字の色を変える（None なら既定の色に戻す）。枠線も背景と同じ色にする
 #[tauri::command]
 pub fn set_title_bar_colors(window: tauri::WebviewWindow, background: Option<String>, foreground: Option<String>) -> Result<(), String> {
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
-    let set = |attr: i32, color: u32| unsafe {
-        DwmSetWindowAttribute(hwnd, attr as u32, &color as *const u32 as *const _, std::mem::size_of::<u32>() as u32)
-    };
     let bg = colorref(background.as_deref());
-    set(DWMWA_CAPTION_COLOR, bg);
-    set(DWMWA_BORDER_COLOR, bg);
-    set(DWMWA_TEXT_COLOR, colorref(foreground.as_deref()));
+    let fg = colorref(foreground.as_deref());
+    #[cfg(windows)]
+    {
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
+        let set = |attr: i32, color: u32| unsafe {
+            DwmSetWindowAttribute(hwnd, attr as u32, &color as *const u32 as *const _, std::mem::size_of::<u32>() as u32)
+        };
+        set(DWMWA_CAPTION_COLOR, bg);
+        set(DWMWA_BORDER_COLOR, bg);
+        set(DWMWA_TEXT_COLOR, fg);
+    }
+    #[cfg(not(windows))]
+    let _ = (window, bg, fg);
     Ok(())
 }
 

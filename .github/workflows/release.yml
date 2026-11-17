@@ -1,4 +1,4 @@
-# v で始まるタグ（v0.2.0 など）を push すると、テストしてから Windows 用のインストーラーを作り、
+# v で始まるタグ（v0.2.0 など）を push すると、テストしてから Windows 用・Mac 用のインストーラーを作り、
 # GitHub の Releases に公開する。アプリのバージョンはタグから取る
 name: release
 
@@ -10,7 +10,39 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: タグを確認してリリース枠を作る
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "タグ $TAG は v1.2.3 の形にしてください" >&2
+            exit 1
+          fi
+          body="$(cat <<'EOF'
+          下の Assets からお使いの OS に合うものを選んでください。
+          - **Windows**
+            - `*-setup.exe`: インストーラー（通常はこちら）
+            - `*.msi`: 管理者が配布するときのインストーラー
+            - `*-portable.exe`: インストールせずにそのまま起動できる単体の exe（WebView2 ランタイムが必要。Windows 11 は標準で入っている）
+          - **Mac**
+            - `*_universal.dmg`: インストーラー（Apple Silicon / Intel 両対応。開いて `mark-shell.app` を `Applications` に入れてください。初回起動時に警告が出た場合は、右クリック →「開く」または「システム設定」→「プライバシーとセキュリティ」から許可してください）
+          EOF
+          )"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "mark-shell $TAG" --notes "$body"
+          else
+            gh release create "$TAG" --title "mark-shell $TAG" --notes "$body"
+          fi
+
+  windows:
+    needs: prepare
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +68,6 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          # MSI は「数字.数字.数字」しか受け付けない
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "タグ ${{ github.ref_name }} は v1.2.3 の形にしてください" }
           $path = 'src-tauri/tauri.conf.json'
           $conf = Get-Content $path -Raw | ConvertFrom-Json
           $conf.version = $version
@@ -64,11 +94,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: mark-shell ${{ github.ref_name }}
-          releaseBody: |
-            下の Assets から選んでください。
-            - `*-setup.exe`: インストーラー（通常はこちら）
-            - `*.msi`: 管理者が配布するときのインストーラー
-            - `*-portable.exe`: インストールせずにそのまま起動できる単体の exe（WebView2 ランタイムが必要。Windows 11 は標準で入っている）
           releaseDraft: false
           prerelease: false
 
@@ -82,3 +107,139 @@ jobs:
           $portable = "mark-shell_${version}_x64-portable.exe"
           Copy-Item src-tauri/target/release/mark-shell.exe $portable
           gh release upload '${{ github.ref_name }}' $portable --clobber
+
+      - name: Windows 用アップデートの署名を退避する
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-windows
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+          if-no-files-found: ignore
+
+  macos:
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Apple Silicon と Intel の両方で動く Universal バイナリを作る
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            crates/core
+
+      - name: タグからバージョンを設定する
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(p, "utf8"));
+            c.version = process.env.TAG.replace(/^v/, "");
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
+          '
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - run: npm ci
+
+      - name: テスト
+        run: |
+          npm run check
+          npm test
+          cd crates/core
+          cargo test
+          cd ../../src-tauri
+          cargo test
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          APPLE_SIGNING_IDENTITY: '-'
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: mark-shell ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: --target universal-apple-darwin
+
+      - name: Mac 用アップデートの署名を退避する
+        uses: actions/upload-artifact@v4
+        with:
+          name: sig-macos
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: ignore
+
+  updater:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: sigs
+
+      # Windows と Mac の両方のプラットフォームを含めた latest.json を作って上書きする
+      - name: latest.json を統合して添付する
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const tag = process.env.TAG;
+            const version = tag.replace(/^v/, "");
+            const base = `https://github.com/${process.env.REPO}/releases/download/${tag}`;
+            const findSig = (dir) => {
+              if (!fs.existsSync(dir)) return null;
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) {
+                  const r = findSig(full);
+                  if (r) return r;
+                } else if (e.name.endsWith(".sig")) {
+                  return fs.readFileSync(full, "utf8").trim();
+                }
+              }
+              return null;
+            };
+            const platforms = {};
+            const winSig = findSig("sigs/sig-windows");
+            if (winSig) {
+              platforms["windows-x86_64"] = {
+                signature: winSig,
+                url: `${base}/mark-shell_${version}_x64-setup.exe`,
+              };
+            }
+            const macSig = findSig("sigs/sig-macos");
+            if (macSig) {
+              const entry = {
+                signature: macSig,
+                url: `${base}/mark-shell.app.tar.gz`,
+              };
+              platforms["darwin-aarch64"] = entry;
+              platforms["darwin-x86_64"] = entry;
+            }
+            if (Object.keys(platforms).length === 0) process.exit(0);
+            const latest = {
+              version,
+              notes: `mark-shell ${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync("latest.json", JSON.stringify(latest, null, 2) + "\n");
+          '
+          if [ -f latest.json ]; then
+            gh release upload "$TAG" latest.json --clobber
+          fi

@@ -8,7 +8,7 @@
   import { api, Channel, errorMessage, type PtyEvent } from '../lib/api';
   import { TERMINAL_FONT } from '../lib/config';
   import { store, type TermSession } from '../lib/store.svelte';
-  import { tr } from '../lib/i18n.svelte';
+  import { isMac, tr } from '../lib/i18n.svelte';
 
   let { session, active }: { session: TermSession; active: boolean } = $props();
 
@@ -110,10 +110,22 @@
       // 非表示のときは大きさが測れない
     }
 
-    // Ctrl+C は選択中ならコピー、そうでなければシェルへ（中断）。Ctrl+V は貼り付け
+    // Windows は Ctrl+C（選択中または Shift 付き）/ Ctrl+V、Mac は Cmd+C / Cmd+V でコピー・貼り付け
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       const key = e.key.toLowerCase();
+      if (isMac) {
+        if (e.metaKey && !e.ctrlKey && !e.altKey && key === 'c' && term.hasSelection()) {
+          void copySelection();
+          if (!e.shiftKey) term.clearSelection();
+          return false;
+        }
+        if (e.metaKey && !e.ctrlKey && !e.altKey && key === 'v') {
+          void paste();
+          return false;
+        }
+        return true;
+      }
       if (e.ctrlKey && key === 'c' && (e.shiftKey || term.hasSelection())) {
         void copySelection();
         if (!e.shiftKey) term.clearSelection();

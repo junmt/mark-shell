@@ -40,7 +40,7 @@
   });
 
   function select(h: string, e: MouseEvent) {
-    if (e.ctrlKey) selected = selected.includes(h) ? selected.filter((x) => x !== h) : [...selected, h];
+    if (e.ctrlKey || e.metaKey) selected = selected.includes(h) ? selected.filter((x) => x !== h) : [...selected, h];
     else selected = [h];
   }
 

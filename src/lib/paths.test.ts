@@ -24,6 +24,9 @@ describe('paths', () => {
     expect(absToRel('C:\\Notes', 'C:\\Notes\\a\\b.png')).toBe('a/b.png');
     expect(absToRel('C:\\Notes\\', 'c:/notes/a.md')).toBe('a.md');
     expect(absToRel('C:\\Notes', 'C:\\Other\\a.md')).toBeNull();
+    expect(absToRel('/Users/jun/Notes', '/Users/jun/Notes/a/b.md')).toBe('a/b.md');
+    expect(absToRel('/Users/jun/Notes/', '/Users/jun/Notes')).toBe('');
+    expect(absToRel('/Users/jun/Notes', '/Users/jun/Other/a.md')).toBeNull();
   });
 
   it('stem / encode', () => {

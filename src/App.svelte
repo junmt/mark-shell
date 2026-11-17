@@ -21,6 +21,7 @@
   import { git } from './lib/git.svelte';
   import { api } from './lib/api';
   import { opaque } from './lib/vscodeColors';
+  import { isMac } from './lib/i18n.svelte';
 
   let leftHeight = $state(600);
   /** ウィンドウが前面にあるか（タイトルバーの色を変える） */
@@ -29,10 +30,10 @@
   onMount(() => {
     void store.init();
     const unlistenFocus = getCurrentWindow().onFocusChanged((e) => (focused = e.payload));
-    // Ctrl+ホイールで、カーソルの下にあるエディタ・プレビュー・ターミナルの文字の大きさを変える。
+    // Ctrl+ホイール（Mac は Cmd+ホイールも）で、カーソルの下にあるエディタ・プレビュー・ターミナルの文字の大きさを変える。
     // ページ全体の拡大を止めるため passive にしない
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey && !(isMac && e.metaKey)) return;
       e.preventDefault();
       const el = e.target instanceof Element ? e.target : null;
       const target = el?.closest('.term')
@@ -109,18 +110,19 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    const mod = e.ctrlKey && !e.altKey;
+    const mod = (isMac ? e.metaKey : e.ctrlKey) && !e.altKey;
+    const ctrlOrMod = (e.ctrlKey || (isMac && e.metaKey)) && !e.altKey;
     const key = e.key.toLowerCase();
-    // ターミナルでは Ctrl+P などをシェルに渡す。ターミナル内でも効くのは Ctrl+` と Ctrl+Shift の組み合わせだけ。
+    // ターミナルでは Ctrl+P などをシェルに渡す。ターミナル内でも効くのは Ctrl+`（Mac は Cmd+` も）と Ctrl/Cmd+Shift の組み合わせだけ。
     // 日本語キーボードでは ` が Shift+@ なので Ctrl+@ でも切り替える
-    if (mod && !e.shiftKey && (e.code === 'Backquote' || key === '`' || key === '@')) {
+    if (ctrlOrMod && !e.shiftKey && (e.code === 'Backquote' || key === '`' || key === '@')) {
       e.preventDefault();
       e.stopPropagation();
       store.toggleTerminal();
       return;
     }
-    // Ctrl+Shift+5: ターミナルを左右に分割（VS Code と同じ）。ターミナルの中でも効く
-    if (mod && e.shiftKey && e.code === 'Digit5') {
+    // Ctrl/Cmd+Shift+5: ターミナルを左右に分割（VS Code と同じ）。ターミナルの中でも効く
+    if (ctrlOrMod && e.shiftKey && e.code === 'Digit5') {
       e.preventDefault();
       e.stopPropagation();
       store.splitTerminal('row');
@@ -142,6 +144,7 @@
       if (key === 'v') return run(() => store.cycleMode());
       return;
     }
+    if (ctrlOrMod && key === 'tab') return run(() => store.cycleTab(e.shiftKey ? -1 : 1));
     if (mod) {
       if (key === 'p') return run(() => (store.palette = 'files'));
       if (key === 'o') return run(() => void store.chooseRoot());
@@ -151,7 +154,6 @@
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
       if (key === 'w') return run(() => store.activePath && void store.closeTab(store.activePath));
       if (key === ',') return run(() => (store.settingsOpen = true));
-      if (key === 'tab') return run(() => store.cycleTab(e.shiftKey ? -1 : 1));
     }
   }
 

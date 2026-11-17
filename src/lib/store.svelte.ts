@@ -30,7 +30,7 @@ import {
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { resolveTheme } from './themes';
 import { VSCODE_SETTINGS, projectColorsFromText, type ProjectColors } from './vscodeColors';
-import { i18n, resolveLocale, tr } from './i18n.svelte';
+import { i18n, isMac, resolveLocale, tr } from './i18n.svelte';
 import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
 import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type TermLayout } from './termLayout';
@@ -1327,9 +1327,10 @@ class Store {
     const from = fromKey !== null ? this.terminals.find((t) => t.key === fromKey) : undefined;
     const fromShell = from && !from.ai ? from.request.shellId : undefined;
     const shellId = opts.shellId ?? fromShell ?? wslShell ?? (this.config.terminal.defaultShell || null);
-    // シェル未指定なら Rust 側と同じく PowerShell 7 → Windows PowerShell の順で使われる
+    // シェル未指定なら Rust 側と同じく既定のシェル（Windows は PowerShell、Mac はログインシェル）が使われる
     const shell =
-      this.shells.find((s) => s.id === shellId) ?? this.shells.find((s) => s.id === 'pwsh') ?? this.shells.find((s) => s.id === 'powershell');
+      this.shells.find((s) => s.id === shellId) ??
+      (isMac ? this.shells[0] : (this.shells.find((s) => s.id === 'pwsh') ?? this.shells.find((s) => s.id === 'powershell') ?? this.shells[0]));
     const title = opts.title ?? (opts.toolId ? this.aiTools.find((t) => t.id === opts.toolId)?.name : shell?.name) ?? tr('ターミナル', 'Terminal', '终端');
     const s = new TermSession(
       ++this.termSeq,
@@ -1770,7 +1771,7 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
       },
       { id: 'splitTerminalDown', label: tr('ターミナルを上下に分割', 'Split terminal down', '向下拆分终端'), run: () => this.splitTerminal('column') },
       { id: 'rescan', label: tr('フォルダを読み込み直す', 'Reload folder', '重新加载文件夹'), run: () => void this.rescan() },
-      { id: 'reveal', label: tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
+      { id: 'reveal', label: isMac ? tr('Finder で表示', 'Reveal in Finder', '在访达中显示') : tr('エクスプローラーで表示', 'Reveal in File Explorer', '在资源管理器中显示'), run: () => void api.revealInExplorer(doc?.path ?? '') },
       { id: 'print', label: tr('印刷 / PDF に保存', 'Print / Save as PDF', '打印 / 保存为 PDF'), run: () => void this.print() },
       {
         id: 'aiGuide',
