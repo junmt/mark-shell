@@ -108,13 +108,6 @@ jobs:
           Copy-Item src-tauri/target/release/mark-shell.exe $portable
           gh release upload '${{ github.ref_name }}' $portable --clobber
 
-      - name: Windows 用アップデートの署名を退避する
-        uses: actions/upload-artifact@v4
-        with:
-          name: sig-windows
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe.sig
-          if-no-files-found: ignore
-
   macos:
     needs: prepare
     runs-on: macos-latest
@@ -172,74 +165,3 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin
-
-      - name: Mac 用アップデートの署名を退避する
-        uses: actions/upload-artifact@v4
-        with:
-          name: sig-macos
-          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
-          if-no-files-found: ignore
-
-  updater:
-    needs: [windows, macos]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: sigs
-
-      # Windows と Mac の両方のプラットフォームを含めた latest.json を作って上書きする
-      - name: latest.json を統合して添付する
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const tag = process.env.TAG;
-            const version = tag.replace(/^v/, "");
-            const base = `https://github.com/${process.env.REPO}/releases/download/${tag}`;
-            const findSig = (dir) => {
-              if (!fs.existsSync(dir)) return null;
-              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-                const full = path.join(dir, e.name);
-                if (e.isDirectory()) {
-                  const r = findSig(full);
-                  if (r) return r;
-                } else if (e.name.endsWith(".sig")) {
-                  return fs.readFileSync(full, "utf8").trim();
-                }
-              }
-              return null;
-            };
-            const platforms = {};
-            const winSig = findSig("sigs/sig-windows");
-            if (winSig) {
-              platforms["windows-x86_64"] = {
-                signature: winSig,
-                url: `${base}/mark-shell_${version}_x64-setup.exe`,
-              };
-            }
-            const macSig = findSig("sigs/sig-macos");
-            if (macSig) {
-              const entry = {
-                signature: macSig,
-                url: `${base}/mark-shell.app.tar.gz`,
-              };
-              platforms["darwin-aarch64"] = entry;
-              platforms["darwin-x86_64"] = entry;
-            }
-            if (Object.keys(platforms).length === 0) process.exit(0);
-            const latest = {
-              version,
-              notes: `mark-shell ${tag}`,
-              pub_date: new Date().toISOString(),
-              platforms,
-            };
-            fs.writeFileSync("latest.json", JSON.stringify(latest, null, 2) + "\n");
-          '
-          if [ -f latest.json ]; then
-            gh release upload "$TAG" latest.json --clobber
-          fi
