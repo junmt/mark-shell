@@ -50,6 +50,13 @@
     if (!draft) return;
     draft.markdownExtensions = extText.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
     if (draft.markdownExtensions.length === 0) draft.markdownExtensions = ['md'];
+    draft.terminal.usageInterval = Math.max(0, Math.floor(Number(draft.terminal.usageInterval) || 0));
+    const cleanedCommands: Record<string, string> = {};
+    for (const [k, v] of Object.entries(draft.aiUsageCommands ?? {})) {
+      const trimmed = v.trim();
+      if (trimmed) cleanedCommands[k] = trimmed;
+    }
+    draft.aiUsageCommands = cleanedCommands;
     const next = draft;
     store.settingsOpen = false;
     await store.updateConfig(next);
@@ -319,6 +326,28 @@
 
       <section>
         <h3>{isMac ? tr('AI ツールとコマンド', 'AI tools and command', 'AI 工具与命令') : tr('AI ツールと Windows', 'AI tools and Windows', 'AI 工具与 Windows')}</h3>
+        <p class="note">
+          {tr(
+            '各 AI の Usage 取得コマンドを指定すると、ターミナルエリアの下に標準出力を表示します（ai-tools.json の usageCommand でも指定できます）。',
+            'Specify a usage command for each AI tool to display its standard output below the terminal area (can also be set via usageCommand in ai-tools.json).',
+            '为各 AI 工具指定用量获取命令后，将在终端区域下方显示其标准输出（也可在 ai-tools.json 的 usageCommand 中指定）。',
+          )}
+        </p>
+        <label>
+          {tr('AI Usage の更新間隔（秒。0 で自動更新しない）', 'AI Usage refresh interval (seconds; 0 disables auto-refresh)', 'AI 用量刷新间隔（秒；0 表示不自动刷新）')}
+          <input type="number" min="0" max="3600" bind:value={draft.terminal.usageInterval} />
+        </label>
+        {#each store.aiTools as tool (tool.id)}
+          <label>
+            {tr(`${tool.name} の Usage コマンド`, `Usage command for ${tool.name}`, `${tool.name} 的用量命令`)}
+            <input
+              type="text"
+              bind:value={draft.aiUsageCommands[tool.id]}
+              placeholder={tool.usageCommand || tr('空なら表示しない', 'Leave empty to hide', '留空则不显示')}
+              spellcheck="false"
+            />
+          </label>
+        {/each}
         <p class="note">
           {tr(
             'AI ツールの定義（コマンド名・起動方法・メニュー）は設定ファイルで追加・変更できます。',

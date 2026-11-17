@@ -37,8 +37,10 @@ export type ToolInfo = {
   found: boolean;
   path: string | null;
   installUrl: string | null;
+  usageCommand: string | null;
   actions: { id: string; label: string }[];
 };
+export type UsageResult = { id: string; output: string; error: string | null };
 
 export type AiSelection = { fromLine: number; toLine: number; text: string };
 
@@ -113,6 +115,8 @@ export const api = {
   launchIdeTool: (toolId: string, actionId: string | null, note: string | null) =>
     invoke<void>('launch_ide_tool', { toolId, actionId, note }),
   aiToolsFilePath: () => invoke<string>('ai_tools_file_path'),
+  runAiUsage: (toolId: string, command: string | null, note: string | null) =>
+    invoke<UsageResult>('run_ai_usage', { toolId, command, note }),
   setAiContext: (note: string | null, selection: AiSelection | null) => invoke<void>('set_ai_context', { note, selection }),
 };
 

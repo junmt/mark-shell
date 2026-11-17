@@ -131,6 +131,7 @@ pub fn run() {
             ai_tools::list_ai_tools,
             ai_tools::launch_ide_tool,
             ai_tools::ai_tools_file_path,
+            ai_tools::run_ai_usage,
             ai_context::set_ai_context,
             git::git_repos,
             git::git_status,

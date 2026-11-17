@@ -172,6 +172,8 @@ pub struct ToolDef {
     pub actions: Vec<Action>,
     #[serde(default)]
     pub install_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_command: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -187,7 +189,16 @@ pub struct ToolInfo {
     found: bool,
     path: Option<String>,
     install_url: Option<String>,
+    usage_command: Option<String>,
     actions: Vec<ActionInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageResult {
+    pub id: String,
+    pub output: String,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -420,6 +431,7 @@ pub async fn list_ai_tools(app: tauri::AppHandle) -> Vec<ToolInfo> {
                     name: t.name,
                     kind: t.kind,
                     install_url: t.install_url,
+                    usage_command: t.usage_command,
                 }
             })
             .collect()
@@ -459,6 +471,161 @@ pub fn launch_ide_tool(
 pub fn ai_tools_file_path() -> String {
     let _ = load();
     tools_path().to_string_lossy().into_owned()
+}
+
+/// 標準出力に含まれる ANSI エスケープシーケンスを取り除く
+fn strip_ansi(s: &str) -> String {
+    regex::Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+        .unwrap()
+        .replace_all(s, "")
+        .into_owned()
+}
+
+/// 子プロセスを上限時間つきで実行し、(成功したか, 標準出力, 標準エラー) を返す
+fn run_command_timeout(mut cmd: std::process::Command, timeout: std::time::Duration) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>), String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.take(64 * 1024).read_to_end(&mut buf);
+        buf
+    });
+    let err_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.take(64 * 1024).read_to_end(&mut buf);
+        buf
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(s) => break s,
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(tr!("コマンドがタイムアウトしました", "Command timed out", "命令超时"));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    };
+    let out = out_thread.join().unwrap_or_default();
+    let err = err_thread.join().unwrap_or_default();
+    Ok((status, out, err))
+}
+
+/// 各 AI ツールの Usage 取得コマンドを実行して標準出力を返す
+#[tauri::command]
+pub async fn run_ai_usage(
+    app: tauri::AppHandle,
+    tool_id: String,
+    command: Option<String>,
+    note: Option<String>,
+) -> UsageResult {
+    use tauri::Manager;
+    let state = app.state::<crate::state::AppState>();
+    let root = state.root().ok();
+    let wsl = state.wsl();
+    tauri::async_runtime::spawn_blocking(move || {
+        let tool = load().into_iter().find(|t| t.id == tool_id);
+        let raw_cmd = command
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| tool.as_ref().and_then(|t| t.usage_command.as_ref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+        let Some(raw_cmd) = raw_cmd else {
+            return UsageResult { id: tool_id, output: String::new(), error: None };
+        };
+        let is_cli = tool.as_ref().map(|t| t.kind == "cli").unwrap_or(true);
+        let cmd = match (&wsl, is_cli) {
+            (Some(w), true) => {
+                let mut map = HashMap::new();
+                map.insert("root", w.linux_root.clone());
+                if let Some(n) = note.as_deref() {
+                    map.insert("note", w.linux_path(n));
+                    map.insert("noteRelativePath", n.to_string());
+                    map.insert("noteDir", w.linux_path(crate::paths::parent_rel(n)));
+                }
+                let vars = Vars { map };
+                let line = vars.expand(&raw_cmd);
+                let mut c = std::process::Command::new(crate::wsl::wsl_exe());
+                c.args(["-d", &w.distro, "--cd", &w.linux_root, "--exec", "sh", "-lc", &line]);
+                c.env("NO_COLOR", "1");
+                c.env("MARKSHELL_ROOT", &w.linux_root);
+                c.env("WSLENV", "NO_COLOR:MARKSHELL_ROOT");
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                }
+                c
+            }
+            _ => {
+                let vars = match &root {
+                    Some(r) => Vars::new(r, note.as_deref(), None),
+                    None => Vars { map: HashMap::new() },
+                };
+                let line = vars.expand(&raw_cmd);
+                let cwd = root
+                    .clone()
+                    .filter(|p| p.is_dir())
+                    .or_else(dirs::home_dir)
+                    .unwrap_or_else(std::env::temp_dir);
+                #[cfg(windows)]
+                let mut c = {
+                    use std::os::windows::process::CommandExt;
+                    let comspec = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
+                    let mut c = std::process::Command::new(comspec);
+                    c.args(["/d", "/c", &format!("chcp 65001 >nul & {line}")]);
+                    c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                    c
+                };
+                #[cfg(not(windows))]
+                let mut c = {
+                    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+                    let mut c = std::process::Command::new(shell);
+                    c.args(["-c", &line]);
+                    c
+                };
+                c.current_dir(&cwd);
+                c.env("NO_COLOR", "1");
+                if let Some(r) = &root {
+                    c.env("MARKSHELL_ROOT", r.to_string_lossy().as_ref());
+                }
+                c
+            }
+        };
+        match run_command_timeout(cmd, std::time::Duration::from_secs(15)) {
+            Ok((status, stdout, stderr)) => {
+                let out = strip_ansi(&String::from_utf8_lossy(&stdout)).trim().to_string();
+                let err = strip_ansi(&String::from_utf8_lossy(&stderr)).trim().to_string();
+                if status.success() {
+                    UsageResult {
+                        id: tool_id,
+                        output: if out.is_empty() { err } else { out },
+                        error: None,
+                    }
+                } else {
+                    let msg = if !err.is_empty() {
+                        err
+                    } else if !out.is_empty() {
+                        out
+                    } else {
+                        format!("exit {}", status.code().unwrap_or(-1))
+                    };
+                    UsageResult { id: tool_id, output: String::new(), error: Some(msg) }
+                }
+            }
+            Err(e) => UsageResult { id: tool_id, output: String::new(), error: Some(e) },
+        }
+    })
+    .await
+    .unwrap_or_else(|e| UsageResult { id: String::new(), output: String::new(), error: Some(e.to_string()) })
 }
 
 #[cfg(test)]
@@ -513,5 +680,13 @@ mod tests {
         assert_eq!(f.tools[1].kind, "ide");
         // 移行済みなら何もしない
         assert!(!migrate(&mut f));
+    }
+
+    #[test]
+    fn strip_ansi_and_usage_command() {
+        assert_eq!(strip_ansi("\x1b[32m50%\x1b[0m ($2.10)"), "50% ($2.10)");
+        let json = r#"{"tools":[{"id":"claude-code","name":"Claude Code","usageCommand":"ccusage"}]}"#;
+        let f: ToolsFile = serde_json::from_str(json).unwrap();
+        assert_eq!(f.tools[0].usage_command.as_deref(), Some("ccusage"));
     }
 }

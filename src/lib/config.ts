@@ -57,7 +57,11 @@ export type Config = {
     fontSize: number;
     fontFamily: string;
     copyOnSelect: boolean;
+    /** 各 AI の Usage を取得し直す間隔（秒。0 で自動更新しない） */
+    usageInterval: number;
   };
+  /** AI ツールごとの Usage 取得コマンド（ツール ID → コマンド。空なら ai-tools.json の usageCommand を使う） */
+  aiUsageCommands: Record<string, string>;
 };
 
 export const defaultConfig: Config = {
@@ -96,15 +100,19 @@ export const defaultConfig: Config = {
     fontSize: 14,
     fontFamily: '',
     copyOnSelect: false,
+    usageInterval: 30,
   },
+  aiUsageCommands: {},
 };
 
 export function mergeConfig(raw: Record<string, unknown> | null | undefined): Config {
   const r = (raw ?? {}) as Partial<Config>;
+  const rawCommands = r.aiUsageCommands && typeof r.aiUsageCommands === 'object' ? (r.aiUsageCommands as Record<string, string>) : {};
   return {
     ...defaultConfig,
     ...r,
     terminal: { ...defaultConfig.terminal, ...((r.terminal ?? {}) as Partial<Config['terminal']>) },
+    aiUsageCommands: { ...rawCommands },
     customColors: { base: r.customColors?.base ?? 'light', colors: { ...(r.customColors?.colors ?? {}) } },
   };
 }

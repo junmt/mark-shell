@@ -129,6 +129,12 @@ export type DialogRequest = {
 };
 export type Toast = { id: number; message: string; kind: 'info' | 'error' };
 export type Command = { id: string; label: string; shortcut?: string; run: () => void };
+export type AiUsageState = {
+  output: string;
+  error: string | null;
+  loading: boolean;
+  updatedAt: number | null;
+};
 
 class Store {
   // ---- ルートとファイル一覧 ----
@@ -197,6 +203,9 @@ class Store {
   termSeq = 0;
   shells = $state<ShellInfo[]>([]);
   aiTools = $state<ToolInfo[]>([]);
+  /** 各 AI ツールの Usage 表示（ツール ID → 実行結果） */
+  aiUsage = new SvelteMap<string, AiUsageState>();
+  aiUsageRefreshing = $state(false);
   /** AI セッション中に変わったファイル → 変わる前の内容（開いていたものだけ） */
   aiChanged = new SvelteSet<string>();
   aiBefore = new SvelteMap<string, string>();
@@ -346,6 +355,60 @@ class Store {
 
   async refreshAiTools() {
     this.aiTools = await api.listAiTools();
+    if (this.terminalVisible) void this.refreshAiUsage();
+  }
+
+  /** ツールごとの Usage 取得コマンド（設定画面の指定を優先し、なければ ai-tools.json の usageCommand） */
+  usageCommandFor(tool: ToolInfo): string {
+    return (this.config.aiUsageCommands?.[tool.id] ?? '').trim() || (tool.usageCommand ?? '').trim();
+  }
+
+  /** 各 AI ツールの Usage コマンドを実行して結果を更新する */
+  async refreshAiUsage() {
+    if (this.aiUsageRefreshing) return;
+    const targets = this.aiTools
+      .map((t) => ({ tool: t, cmd: this.usageCommandFor(t) }))
+      .filter((x) => x.cmd.length > 0);
+    const activeIds = new Set(targets.map((x) => x.tool.id));
+    for (const k of [...this.aiUsage.keys()]) {
+      if (!activeIds.has(k)) this.aiUsage.delete(k);
+    }
+    if (targets.length === 0) return;
+    this.aiUsageRefreshing = true;
+    const note = this.activeDoc?.path ?? null;
+    for (const { tool } of targets) {
+      const prev = this.aiUsage.get(tool.id);
+      this.aiUsage.set(tool.id, {
+        output: prev?.output ?? '',
+        error: prev?.error ?? null,
+        loading: true,
+        updatedAt: prev?.updatedAt ?? null,
+      });
+    }
+    try {
+      await Promise.all(
+        targets.map(async ({ tool, cmd }) => {
+          try {
+            const res = await api.runAiUsage(tool.id, cmd, note);
+            this.aiUsage.set(tool.id, {
+              output: res.output,
+              error: res.error,
+              loading: false,
+              updatedAt: Date.now(),
+            });
+          } catch (e) {
+            this.aiUsage.set(tool.id, {
+              output: '',
+              error: errorMessage(e),
+              loading: false,
+              updatedAt: Date.now(),
+            });
+          }
+        }),
+      );
+    } finally {
+      this.aiUsageRefreshing = false;
+    }
   }
 
   // ================= アップデート =================
@@ -1642,7 +1705,12 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
 
   async updateConfig(patch: Partial<Config>) {
     const before = this.config;
-    this.config = { ...this.config, ...patch, terminal: { ...this.config.terminal, ...(patch.terminal ?? {}) } };
+    this.config = {
+      ...this.config,
+      ...patch,
+      terminal: { ...this.config.terminal, ...(patch.terminal ?? {}) },
+      aiUsageCommands: patch.aiUsageCommands ? { ...patch.aiUsageCommands } : this.config.aiUsageCommands,
+    };
     try {
       await api.setConfig($state.snapshot(this.config));
     } catch (e) {
