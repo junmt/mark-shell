@@ -57,21 +57,23 @@ const DEFAULT_TOOLS: &str = r#"{
     },
     {
       "id": "antigravity",
-      "name": "Antigravity",
-      "kind": "ide",
+      "name": "Antigravity CLI",
+      "kind": "cli",
       "detect": {
-        "command": "antigravity",
+        "command": "agy",
         "paths": [
-          "%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe",
-          "%ProgramFiles%\\Antigravity\\Antigravity.exe",
-          "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity",
-          "/Applications/Antigravity.app/Contents/MacOS/Antigravity"
+          "%USERPROFILE%\\.local\\bin\\agy.exe",
+          "~/.local/bin/agy",
+          "/opt/homebrew/bin/agy",
+          "/usr/local/bin/agy"
         ]
       },
-      "launch": { "args": ["${root}"], "detached": true },
+      "launch": { "shell": "default", "args": [], "cwd": "${root}" },
       "installUrl": "https://antigravity.google/",
       "actions": [
-        { "id": "open-note", "label": "このファイルを開く", "args": ["${root}", "${note}"] }
+        { "id": "summarize", "label": "このファイルを要約する", "args": ["-i", "${noteRelativePath} を読んで、要点をまとめてください"] },
+        { "id": "proofread", "label": "このファイルを推敲する", "args": ["-i", "${noteRelativePath} の誤字脱字や分かりにくい表現を直してください"] },
+        { "id": "selection", "label": "選択範囲について聞く", "args": ["-i", "${selectionFile} に、${noteRelativePath} から選択した部分を書き出しました。この部分について説明してください"] }
       ]
     }
   ]
@@ -85,7 +87,6 @@ const BUILTIN_TEXTS: &[(&str, &str, &str)] = &[
     ("このファイルを要約する", "Summarize this file", "总结此文件"),
     ("このファイルを推敲する", "Polish this file", "润色此文件"),
     ("選択範囲について聞く", "Ask about the selection", "询问所选内容"),
-    ("このファイルを開く", "Open this file", "打开此文件"),
     (
         "${noteRelativePath} を読んで、要点をまとめてください",
         "Read ${noteRelativePath} and summarize the key points",
@@ -206,10 +207,33 @@ fn load() -> Vec<ToolDef> {
         let _ = std::fs::write(&path, DEFAULT_TOOLS);
     }
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| DEFAULT_TOOLS.into());
-    serde_json::from_str::<ToolsFile>(&text)
-        .or_else(|_| serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS))
-        .map(|f| f.tools)
-        .unwrap_or_default()
+    let mut file = match serde_json::from_str::<ToolsFile>(&text) {
+        Ok(f) => f,
+        Err(_) => return serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS).map(|f| f.tools).unwrap_or_default(),
+    };
+    if migrate(&mut file) {
+        if let Ok(s) = serde_json::to_string_pretty(&file) {
+            let _ = std::fs::write(&path, s);
+        }
+    }
+    file.tools
+}
+
+/// 以前の既定の定義を今の既定に置き換える。置き換えたら true
+/// - Antigravity: IDE（`antigravity` で別ウィンドウを開く）から Antigravity CLI（`agy` をターミナルで実行）へ
+fn migrate(file: &mut ToolsFile) -> bool {
+    let Ok(defaults) = serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS) else { return false };
+    let mut changed = false;
+    for t in file.tools.iter_mut() {
+        let old_antigravity = t.id == "antigravity" && t.kind == "ide" && t.detect.command.as_deref() == Some("antigravity");
+        if old_antigravity {
+            if let Some(d) = defaults.tools.iter().find(|d| d.id == t.id) {
+                *t = d.clone();
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 /// `%NAME%` 形式の環境変数と先頭の `~` を展開する
@@ -404,7 +428,7 @@ pub async fn list_ai_tools(app: tauri::AppHandle) -> Vec<ToolInfo> {
     .unwrap_or_default()
 }
 
-/// IDE 型のツール（Antigravity など）を別ウィンドウで起動する
+/// IDE 型のツール（kind: "ide"）を別ウィンドウで起動する
 #[tauri::command]
 pub fn launch_ide_tool(
     state: tauri::State<'_, crate::state::AppState>,
@@ -473,5 +497,21 @@ mod tests {
         );
         // ユーザーが書き換えた文言はそのまま
         assert_eq!(localize_builtin("自分の操作", Locale::En), "自分の操作");
+    }
+
+    #[test]
+    fn migrate_old_antigravity_ide() {
+        let old = r#"{"tools":[
+          {"id":"antigravity","name":"Antigravity","kind":"ide","detect":{"command":"antigravity"},"launch":{"args":["${root}"],"detached":true}},
+          {"id":"my-tool","name":"Mine","kind":"ide","detect":{"command":"antigravity"}}
+        ]}"#;
+        let mut f: ToolsFile = serde_json::from_str(old).unwrap();
+        assert!(migrate(&mut f));
+        assert_eq!(f.tools[0].kind, "cli");
+        assert_eq!(f.tools[0].detect.command.as_deref(), Some("agy"));
+        // id が違う定義には触れない
+        assert_eq!(f.tools[1].kind, "ide");
+        // 移行済みなら何もしない
+        assert!(!migrate(&mut f));
     }
 }

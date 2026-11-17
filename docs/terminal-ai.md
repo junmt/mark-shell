@@ -78,8 +78,9 @@
 | Claude Code | CLI | `claude` | ターミナルの新しいタブで `claude` を実行 |
 | Gemini CLI | CLI | `gemini` | ターミナルの新しいタブで `gemini` を実行 |
 | Codex CLI | CLI | `codex` | ターミナルの新しいタブで `codex` を実行 |
-| Antigravity | IDE | `antigravity`（またはインストール先の実行ファイル） | ルートディレクトリを Antigravity で開く |
+| Antigravity CLI | CLI | `agy` | ターミナルの新しいタブで `agy` を実行 |
 
+- 以前の既定の Antigravity の定義（IDE 型、`antigravity` コマンド）が ai-tools.json に残っていれば、起動時に Antigravity CLI の定義に置き換える。
 - 見つかったツールだけをツールバーの「AI ▼」メニューとコマンドパレットに出す。
 - 見つからないツールは設定画面に「未インストール」と表示し、公式のインストール手順へのリンクを出す（クリックしたときだけブラウザで開く）。
 - 各ツールのコマンド名・場所・起動方法は変わる可能性があるため、定義はアプリ本体のコードに埋め込まず、データファイルとして持ち、ユーザーが上書き・追加できるようにする。
@@ -111,11 +112,11 @@
       ]
     },
     {
-      "id": "antigravity",
-      "name": "Antigravity",
+      "id": "my-editor",
+      "name": "My Editor",
       "kind": "ide",
-      "detect": { "command": "antigravity" },
-      "launch": { "command": "antigravity", "args": ["${root}"], "detached": true }
+      "detect": { "command": "my-editor" },
+      "launch": { "command": "my-editor", "args": ["${root}"], "detached": true }
     }
   ]
 }

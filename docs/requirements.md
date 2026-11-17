@@ -63,7 +63,7 @@
 - アプリ内にターミナルパネルを持ち、Windows では PowerShell / コマンドプロンプト / Git Bash / WSL、Mac では zsh / bash / fish / PowerShell 7 などを開ける。
 - カレントディレクトリはルートディレクトリ（または開いているノートのフォルダ）にする。
 - PC にインストールされている AI ツールを自動検出し、ワンクリックで起動できる。
-  - 例: Claude Code（`claude`）、Antigravity、Gemini CLI（`gemini`）、Codex CLI（`codex`）
+  - 例: Claude Code（`claude`）、Antigravity CLI（`agy`）、Gemini CLI（`gemini`）、Codex CLI（`codex`）
 - AI ツールがファイルを書き換えたら、ファイルツリー・エディタ・プレビューに即座に反映する。
 - 詳細は [terminal-ai.md](terminal-ai.md) を参照。
 
