@@ -300,6 +300,12 @@ fn run_tool_cli(tool_id: &str, args: &[&str]) -> Option<String> {
     cmd.args(args);
     cmd.current_dir(dirs::home_dir().unwrap_or_else(std::env::temp_dir));
     cmd.env("NO_COLOR", "1");
+    // CLI の自動更新を止める。Antigravity の agy は 15 分おきに自動更新の確認を切り離したプロセス
+    // （agy --bg-updater）で行い、その中で実行する `agy --version` に新しいコンソールが作られる。
+    // CREATE_NO_WINDOW は切り離されたプロセスの子には届かないので、既定のターミナル（Windows Terminal）の
+    // 黒いウィンドウが一瞬表示されていた。Claude Code も念のため同じように止める（更新はユーザーが使うときに行われる）
+    cmd.env("AGY_CLI_DISABLE_AUTO_UPDATE", "true");
+    cmd.env("DISABLE_AUTOUPDATER", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
