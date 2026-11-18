@@ -1174,6 +1174,12 @@ pub async fn run_ai_usage(
 }
 
 /// Usage 取得コマンドを実行して、使用量の表示を作る
+/// WSL で Usage のコマンドを実行する前に、PATH から Windows 側のディレクトリ（/mnt/...）を外す。
+/// WSL から Windows の実行ファイル（npx など）を呼ぶと、そのたびに wslhost.exe と Windows のプロセスに
+/// 新しいコンソールが作られ、黒いウィンドウが一瞬表示されることがある（CREATE_NO_WINDOW は孫まで届かない）
+const WSL_NO_INTEROP_PATH: &str =
+    "p=; IFS=:; for d in $PATH; do case $d in /mnt/*) ;; *) p=${p:+$p:}$d ;; esac; done; unset IFS; PATH=$p; export PATH; ";
+
 fn run_usage_command(
     tool_id: String,
     command: Option<String>,
@@ -1202,7 +1208,42 @@ fn run_usage_command(
         .as_deref()
         == Some(raw_cmd.as_str());
     let is_cli = tool.as_ref().map(|t| t.kind == "cli").unwrap_or(true);
-    let cmd = match (&wsl, is_cli) {
+    // Windows（Mac）側で実行する。WSL のフォルダ（\\wsl.localhost\...）は cmd.exe がカレントにできないので、ホームで実行する
+    let host_cmd = || {
+        let vars = match &root {
+            Some(r) => Vars::new(r, note.as_deref(), None),
+            None => Vars { map: HashMap::new() },
+        };
+        let line = vars.expand(&raw_cmd);
+        let cwd = root
+            .clone()
+            .filter(|p| wsl.is_none() && p.is_dir())
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(std::env::temp_dir);
+        #[cfg(windows)]
+        let mut c = {
+            use std::os::windows::process::CommandExt;
+            let comspec = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
+            let mut c = std::process::Command::new(comspec);
+            c.args(["/d", "/c", &format!("chcp 65001 >nul & {line}")]);
+            c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            c
+        };
+        #[cfg(not(windows))]
+        let mut c = {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+            let mut c = std::process::Command::new(shell);
+            c.args(["-c", &line]);
+            c
+        };
+        c.current_dir(&cwd);
+        c.env("NO_COLOR", "1");
+        if let Some(r) = &root {
+            c.env("MARKSHELL_ROOT", r.to_string_lossy().as_ref());
+        }
+        c
+    };
+    let res = match (&wsl, is_cli) {
         (Some(w), true) => {
             let mut map = HashMap::new();
             map.insert("root", w.linux_root.clone());
@@ -1212,7 +1253,7 @@ fn run_usage_command(
                 map.insert("noteDir", w.linux_path(crate::paths::parent_rel(n)));
             }
             let vars = Vars { map };
-            let line = vars.expand(&raw_cmd);
+            let line = format!("{WSL_NO_INTEROP_PATH}{}", vars.expand(&raw_cmd));
             let mut c = std::process::Command::new(crate::wsl::wsl_exe());
             c.args(["-d", &w.distro, "--cd", &w.linux_root, "--exec", "sh", "-lc", &line]);
             c.env("NO_COLOR", "1");
@@ -1223,44 +1264,19 @@ fn run_usage_command(
                 use std::os::windows::process::CommandExt;
                 c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             }
-            c
-        }
-        _ => {
-            let vars = match &root {
-                Some(r) => Vars::new(r, note.as_deref(), None),
-                None => Vars { map: HashMap::new() },
-            };
-            let line = vars.expand(&raw_cmd);
-            let cwd = root
-                .clone()
-                .filter(|p| p.is_dir())
-                .or_else(dirs::home_dir)
-                .unwrap_or_else(std::env::temp_dir);
-            #[cfg(windows)]
-            let mut c = {
-                use std::os::windows::process::CommandExt;
-                let comspec = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
-                let mut c = std::process::Command::new(comspec);
-                c.args(["/d", "/c", &format!("chcp 65001 >nul & {line}")]);
-                c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-                c
-            };
-            #[cfg(not(windows))]
-            let mut c = {
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-                let mut c = std::process::Command::new(shell);
-                c.args(["-c", &line]);
-                c
-            };
-            c.current_dir(&cwd);
-            c.env("NO_COLOR", "1");
-            if let Some(r) = &root {
-                c.env("MARKSHELL_ROOT", r.to_string_lossy().as_ref());
+            let res = run_command_timeout(c, std::time::Duration::from_secs(15));
+            let ok = matches!(&res, Ok((s, out, err)) if s.success() && (!out.is_empty() || !err.is_empty()));
+            // WSL に Node がなく、プリセットのコマンド（npx ccusage）が動かなければ、Windows 側で実行する
+            // （これまで WSL から Windows の npx を呼んでいたのと同じ結果になる）
+            if !ok && is_default_cmd {
+                run_command_timeout(host_cmd(), std::time::Duration::from_secs(15))
+            } else {
+                res
             }
-            c
         }
+        _ => run_command_timeout(host_cmd(), std::time::Duration::from_secs(15)),
     };
-    match run_command_timeout(cmd, std::time::Duration::from_secs(15)) {
+    match res {
         Ok((status, stdout, stderr)) => {
             let out = strip_ansi(&String::from_utf8_lossy(&stdout)).trim().to_string();
             let err = strip_ansi(&String::from_utf8_lossy(&stderr)).trim().to_string();

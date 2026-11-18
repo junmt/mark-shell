@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { store, type AiUsageState, type MenuItem, type TermSession } from '../lib/store.svelte';
   import Icon from './Icon.svelte';
   import Splitter from './Splitter.svelte';
@@ -17,12 +18,15 @@
     })),
   );
 
-  // 設定された間隔（既定 30 秒）で各 AI の Usage コマンドを実行する
+  // 設定された間隔（既定 30 秒）で各 AI の Usage コマンドを実行する。
+  // 間隔と対象（ツールとコマンド）が変わったときだけ実行し直す。refreshAiUsage は中で aiUsage・aiUsageRefreshing・
+  // activeDoc を読むので、untrack しないとそれらの変化（＝実行の完了）でこの effect が走り直し、
+  // コマンドを間隔なしで延々と起動し続ける
   $effect(() => {
     const interval = store.config.terminal.usageInterval;
     const sig = store.usageTargets().map((x) => `${x.tool.id}:${x.cmd}`).join('\n');
     void sig;
-    void store.refreshAiUsage();
+    untrack(() => void store.refreshAiUsage());
     if (interval <= 0) return;
     const id = setInterval(() => {
       if (document.visibilityState !== 'hidden') void store.refreshAiUsage();
