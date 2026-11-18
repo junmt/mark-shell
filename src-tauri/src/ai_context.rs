@@ -48,11 +48,12 @@ pub fn context_file() -> PathBuf {
 }
 
 /// Claude Code の `--settings` に渡すフック定義を書き出し、そのパスを返す。
-/// 実行ファイルの場所は開発版とリリース版で違うので、起動のたびに書き直す
+/// 実行ファイルの場所は開発版とリリース版で違うので、起動のたびに書き直す。
+/// ユーザーが自分でステータスラインを設定していなければ、残量（rate_limits）を受け取るステータスラインも登録する
 pub fn claude_settings_file() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     // args を指定するとシェルを通さずに直接起動される（Git Bash の有無や文字コードに左右されない）
-    let settings = serde_json::json!({
+    let mut settings = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [{
                 "hooks": [{
@@ -64,6 +65,9 @@ pub fn claude_settings_file() -> Result<PathBuf, String> {
             }]
         }
     });
+    if !crate::rate_limits::user_has_statusline() {
+        settings["statusLine"] = serde_json::json!({ "type": "command", "command": crate::rate_limits::statusline_command(&exe) });
+    }
     let path = local_dir().join("claude-settings.json");
     let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
@@ -77,7 +81,7 @@ pub fn claude_settings_file() -> Result<PathBuf, String> {
 /// （WSL は /mnt/c/... の Windows の実行ファイルを直接起動できる）。戻り値は WSL から見たパス
 pub fn claude_settings_file_wsl(wsl: &crate::wsl::WslRoot) -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let settings = serde_json::json!({
+    let mut settings = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [{
                 "hooks": [{
@@ -89,6 +93,9 @@ pub fn claude_settings_file_wsl(wsl: &crate::wsl::WslRoot) -> Result<String, Str
             }]
         }
     });
+    if !crate::rate_limits::user_has_statusline_wsl(&wsl.distro) {
+        settings["statusLine"] = serde_json::json!({ "type": "command", "command": crate::rate_limits::statusline_command_wsl(&wsl.to_linux(&exe)?) });
+    }
     let path = local_dir().join("claude-settings-wsl.json");
     let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
@@ -181,6 +188,13 @@ fn render(ctx: &Context, l: Locale) -> String {
         ));
     }
     out
+}
+
+/// ターミナルに渡した文脈ファイルに書かれたアプリの言語（フックやステータスラインは別プロセスなので）
+pub fn context_locale() -> Option<Locale> {
+    let path = std::env::var_os("MARKSHELL_CONTEXT_FILE")?;
+    let ctx = serde_json::from_slice::<Context>(&std::fs::read(path).ok()?).ok()?;
+    Some(i18n::parse(&ctx.locale))
 }
 
 /// `mark-shell.exe --ai-context` として呼ばれたときの処理。標準出力が Claude の文脈に足される。

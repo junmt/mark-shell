@@ -204,6 +204,51 @@ pub struct UsageResult {
     pub output: String,
     pub detail: String,
     pub error: Option<String>,
+    /// あとどれくらい使えるか（レート制限の枠ごとの使用率とリセット時刻）。取れないツールは空
+    pub limits: Vec<crate::rate_limits::Limit>,
+    /// limits を記録した時刻（UNIX 秒）
+    pub limits_updated_at: Option<u64>,
+    /// limits が取れないときの理由（画面に出す）
+    pub limits_note: Option<String>,
+}
+
+impl UsageResult {
+    fn new(id: String, output: String, detail: String, error: Option<String>) -> Self {
+        UsageResult { id, output, detail, error, limits: Vec::new(), limits_updated_at: None, limits_note: None }
+    }
+}
+
+/// ツールごとに、あとどれくらい使えるかを足す
+fn with_limits(mut r: UsageResult) -> UsageResult {
+    match r.id.as_str() {
+        "claude-code" => match crate::rate_limits::read_claude() {
+            Some(rec) => {
+                r.limits = rec.limits;
+                r.limits_updated_at = Some(rec.updated_at);
+            }
+            None if crate::rate_limits::user_has_statusline() => {
+                r.limits_note = Some(tr!(
+                    "ステータスラインを自分で設定しているため、残りを取得できません",
+                    "Remaining usage is unavailable because you set your own status line",
+                    "由于你自行设置了状态栏，无法获取剩余用量"
+                ));
+            }
+            None => {
+                r.limits_note = Some(tr!(
+                    "mark-shell のターミナルで Claude Code を使うと、残りを表示します",
+                    "Use Claude Code in a mark-shell terminal to show the remaining usage",
+                    "在 mark-shell 的终端中使用 Claude Code 后，会显示剩余用量"
+                ));
+            }
+        },
+        "codex-cli" => {
+            let (limits, at, _, _) = codex_local_stats();
+            r.limits = limits;
+            r.limits_updated_at = at;
+        }
+        _ => {}
+    }
+    r
 }
 
 #[derive(Serialize)]
@@ -576,20 +621,31 @@ fn format_token_summary(today: u64, total: u64, rate_prefix: Option<&str>) -> (S
     (short, detail)
 }
 
-/// Codex の ~/.codex/sessions から最新のレート制限（5h / 7d の使用率）とトークン数を読み取る
-fn codex_local_stats() -> (Option<String>, u64, u64) {
+/// Codex のログの rate_limits の 1 枠（primary / secondary）。ts はその行の時刻（resets_in_seconds の基準）
+fn codex_limit(w: &serde_json::Value, ts: Option<u64>) -> Option<crate::rate_limits::Limit> {
+    let used = w.get("used_percent").and_then(|x| x.as_f64())?;
+    let window_minutes = w.get("window_minutes").and_then(|x| x.as_u64()).unwrap_or(0);
+    let resets_at = w
+        .get("resets_at")
+        .and_then(|x| x.as_u64())
+        .or_else(|| Some(ts? + w.get("resets_in_seconds").and_then(|x| x.as_u64())?));
+    Some(crate::rate_limits::Limit { window_minutes, used_percent: used, resets_at })
+}
+
+/// Codex の ~/.codex/sessions から最新のレート制限（枠ごとの使用率とリセット時刻）、その時刻、トークン数を読み取る
+fn codex_local_stats() -> (Vec<crate::rate_limits::Limit>, Option<u64>, u64, u64) {
     let home = std::env::var("CODEX_HOME")
         .ok()
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".codex")));
-    let Some(base) = home else { return (None, 0, 0) };
+    let Some(base) = home else { return (Vec::new(), None, 0, 0) };
     let mut files = Vec::new();
     walk_files(&base.join("sessions"), 5, "jsonl", &mut files);
     files.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
     let now = now_secs();
     let mut today_tok = 0u64;
     let mut total_tok = 0u64;
-    let mut latest_rate: Option<String> = None;
+    let mut latest: (Vec<crate::rate_limits::Limit>, Option<u64>) = (Vec::new(), None);
     for f in &files {
         let recent_file = std::fs::metadata(f)
             .and_then(|m| m.modified())
@@ -606,14 +662,10 @@ fn codex_local_stats() -> (Option<String>, u64, u64) {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
             let rl = v.get("rate_limits").or_else(|| v.pointer("/payload/rate_limits")).or_else(|| v.pointer("/info/rate_limits"));
             if let Some(rl) = rl {
-                let p = rl.pointer("/primary/used_percent").and_then(|x| x.as_f64());
-                let s = rl.pointer("/secondary/used_percent").and_then(|x| x.as_f64());
-                let parts: Vec<String> = [p.map(|v| format!("5h: {:.0}%", v)), s.map(|v| format!("7d: {:.0}%", v))]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                if !parts.is_empty() {
-                    latest_rate = Some(parts.join(" · "));
+                let ts = v.get("timestamp").and_then(|x| x.as_str()).and_then(parse_iso_secs);
+                let limits: Vec<_> = ["primary", "secondary"].iter().filter_map(|k| codex_limit(rl.get(*k)?, ts)).collect();
+                if !limits.is_empty() {
+                    latest = (limits, ts.or(Some(now)));
                 }
             }
             if let Some(t) = v
@@ -629,8 +681,7 @@ fn codex_local_stats() -> (Option<String>, u64, u64) {
             today_tok = today_tok.saturating_add(session_tok);
         }
     }
-    let _ = now;
-    (latest_rate, today_tok, total_tok)
+    (latest.0, latest.1, today_tok, total_tok)
 }
 
 /// 各 AI ツールがローカルに残すセッションログから Usage（トークン数・レート制限）を集計する
@@ -708,8 +759,9 @@ fn collect_local_usage(tool_id: &str) -> (String, String) {
             format_token_summary(today, total, None)
         }
         "codex-cli" => {
-            let (rate, today, total) = codex_local_stats();
-            format_token_summary(today, total, rate.as_deref())
+            // 残り（rate_limits）は with_limits でバーとして出す
+            let (_, _, today, total) = codex_local_stats();
+            format_token_summary(today, total, None)
         }
         "gemini-cli" => {
             let mut files = Vec::new();
@@ -748,7 +800,7 @@ fn collect_local_usage(tool_id: &str) -> (String, String) {
 }
 
 /// コマンドの標準出力（`ccusage --json` の JSON またはプレーンテキスト）を表示用に整える
-fn format_usage_output(raw: &str, tool_id: &str) -> (String, String) {
+fn format_usage_output(raw: &str, _tool_id: &str) -> (String, String) {
     let trimmed = raw.trim();
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
         if let Some(totals) = v.get("totals") {
@@ -787,12 +839,6 @@ fn format_usage_output(raw: &str, tool_id: &str) -> (String, String) {
                     fmt_tokens(total_tokens)
                 ),
             };
-            if tool_id == "codex-cli" {
-                let (rate, _, _) = codex_local_stats();
-                if let Some(r) = rate {
-                    return (format!("{r} · {short}"), format!("{r}\n{detail}"));
-                }
-            }
             return (short, detail);
         }
     }
@@ -862,118 +908,127 @@ pub async fn run_ai_usage(
     let state = app.state::<crate::state::AppState>();
     let root = state.root().ok();
     let wsl = state.wsl();
-    tauri::async_runtime::spawn_blocking(move || {
-        let tool = load().into_iter().find(|t| t.id == tool_id);
-        let raw_cmd = command
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| tool.as_ref().and_then(|t| t.usage_command.as_ref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
-        let Some(raw_cmd) = raw_cmd else {
-            return UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: None };
-        };
-        // `mark-shell --ai-usage <id>` は自分自身の集計処理を直接呼ぶ
-        if let Some(rest) = raw_cmd.strip_prefix("mark-shell --ai-usage") {
-            let target = rest.trim();
-            let (output, detail) = collect_local_usage(if target.is_empty() { &tool_id } else { target });
-            return UsageResult { id: tool_id, output, detail, error: None };
+    tauri::async_runtime::spawn_blocking(move || with_limits(run_usage_command(tool_id, command, note, root, wsl)))
+        .await
+        .unwrap_or_else(|e| UsageResult::new(String::new(), String::new(), String::new(), Some(e.to_string())))
+}
+
+/// Usage 取得コマンドを実行して、使用量の表示を作る
+fn run_usage_command(
+    tool_id: String,
+    command: Option<String>,
+    note: Option<String>,
+    root: Option<PathBuf>,
+    wsl: Option<std::sync::Arc<crate::wsl::WslRoot>>,
+) -> UsageResult {
+    let tool = load().into_iter().find(|t| t.id == tool_id);
+    let raw_cmd = command
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| tool.as_ref().and_then(|t| t.usage_command.as_ref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+    let Some(raw_cmd) = raw_cmd else {
+        return UsageResult::new(tool_id, String::new(), String::new(), None);
+    };
+    // `mark-shell --ai-usage <id>` は自分自身の集計処理を直接呼ぶ
+    if let Some(rest) = raw_cmd.strip_prefix("mark-shell --ai-usage") {
+        let target = rest.trim();
+        let (output, detail) = collect_local_usage(if target.is_empty() { &tool_id } else { target });
+        return UsageResult::new(tool_id, output, detail, None);
+    }
+    let is_default_cmd = serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS)
+        .ok()
+        .and_then(|f| f.tools.into_iter().find(|d| d.id == tool_id))
+        .and_then(|d| d.usage_command)
+        .as_deref()
+        == Some(raw_cmd.as_str());
+    let is_cli = tool.as_ref().map(|t| t.kind == "cli").unwrap_or(true);
+    let cmd = match (&wsl, is_cli) {
+        (Some(w), true) => {
+            let mut map = HashMap::new();
+            map.insert("root", w.linux_root.clone());
+            if let Some(n) = note.as_deref() {
+                map.insert("note", w.linux_path(n));
+                map.insert("noteRelativePath", n.to_string());
+                map.insert("noteDir", w.linux_path(crate::paths::parent_rel(n)));
+            }
+            let vars = Vars { map };
+            let line = vars.expand(&raw_cmd);
+            let mut c = std::process::Command::new(crate::wsl::wsl_exe());
+            c.args(["-d", &w.distro, "--cd", &w.linux_root, "--exec", "sh", "-lc", &line]);
+            c.env("NO_COLOR", "1");
+            c.env("MARKSHELL_ROOT", &w.linux_root);
+            c.env("WSLENV", "NO_COLOR:MARKSHELL_ROOT");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            c
         }
-        let is_default_cmd = serde_json::from_str::<ToolsFile>(DEFAULT_TOOLS)
-            .ok()
-            .and_then(|f| f.tools.into_iter().find(|d| d.id == tool_id))
-            .and_then(|d| d.usage_command)
-            .as_deref()
-            == Some(raw_cmd.as_str());
-        let is_cli = tool.as_ref().map(|t| t.kind == "cli").unwrap_or(true);
-        let cmd = match (&wsl, is_cli) {
-            (Some(w), true) => {
-                let mut map = HashMap::new();
-                map.insert("root", w.linux_root.clone());
-                if let Some(n) = note.as_deref() {
-                    map.insert("note", w.linux_path(n));
-                    map.insert("noteRelativePath", n.to_string());
-                    map.insert("noteDir", w.linux_path(crate::paths::parent_rel(n)));
-                }
-                let vars = Vars { map };
-                let line = vars.expand(&raw_cmd);
-                let mut c = std::process::Command::new(crate::wsl::wsl_exe());
-                c.args(["-d", &w.distro, "--cd", &w.linux_root, "--exec", "sh", "-lc", &line]);
-                c.env("NO_COLOR", "1");
-                c.env("MARKSHELL_ROOT", &w.linux_root);
-                c.env("WSLENV", "NO_COLOR:MARKSHELL_ROOT");
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-                }
+        _ => {
+            let vars = match &root {
+                Some(r) => Vars::new(r, note.as_deref(), None),
+                None => Vars { map: HashMap::new() },
+            };
+            let line = vars.expand(&raw_cmd);
+            let cwd = root
+                .clone()
+                .filter(|p| p.is_dir())
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(std::env::temp_dir);
+            #[cfg(windows)]
+            let mut c = {
+                use std::os::windows::process::CommandExt;
+                let comspec = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
+                let mut c = std::process::Command::new(comspec);
+                c.args(["/d", "/c", &format!("chcp 65001 >nul & {line}")]);
+                c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
                 c
-            }
-            _ => {
-                let vars = match &root {
-                    Some(r) => Vars::new(r, note.as_deref(), None),
-                    None => Vars { map: HashMap::new() },
-                };
-                let line = vars.expand(&raw_cmd);
-                let cwd = root
-                    .clone()
-                    .filter(|p| p.is_dir())
-                    .or_else(dirs::home_dir)
-                    .unwrap_or_else(std::env::temp_dir);
-                #[cfg(windows)]
-                let mut c = {
-                    use std::os::windows::process::CommandExt;
-                    let comspec = std::env::var("ComSpec").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
-                    let mut c = std::process::Command::new(comspec);
-                    c.args(["/d", "/c", &format!("chcp 65001 >nul & {line}")]);
-                    c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-                    c
-                };
-                #[cfg(not(windows))]
-                let mut c = {
-                    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-                    let mut c = std::process::Command::new(shell);
-                    c.args(["-c", &line]);
-                    c
-                };
-                c.current_dir(&cwd);
-                c.env("NO_COLOR", "1");
-                if let Some(r) = &root {
-                    c.env("MARKSHELL_ROOT", r.to_string_lossy().as_ref());
-                }
+            };
+            #[cfg(not(windows))]
+            let mut c = {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+                let mut c = std::process::Command::new(shell);
+                c.args(["-c", &line]);
                 c
+            };
+            c.current_dir(&cwd);
+            c.env("NO_COLOR", "1");
+            if let Some(r) = &root {
+                c.env("MARKSHELL_ROOT", r.to_string_lossy().as_ref());
             }
-        };
-        match run_command_timeout(cmd, std::time::Duration::from_secs(15)) {
-            Ok((status, stdout, stderr)) => {
-                let out = strip_ansi(&String::from_utf8_lossy(&stdout)).trim().to_string();
-                let err = strip_ansi(&String::from_utf8_lossy(&stderr)).trim().to_string();
-                if status.success() && (!out.is_empty() || !err.is_empty()) {
-                    let raw = if out.is_empty() { &err } else { &out };
-                    let (output, detail) = format_usage_output(raw, &tool_id);
-                    UsageResult { id: tool_id, output, detail, error: None }
-                } else if is_default_cmd {
-                    // プリセットのコマンド（npx ccusage など）が使えない環境・オフライン時はローカルログの集計にフォールバックする
-                    let (output, detail) = collect_local_usage(&tool_id);
-                    UsageResult { id: tool_id, output, detail, error: None }
-                } else {
-                    let msg = if !err.is_empty() {
-                        err
-                    } else if !out.is_empty() {
-                        out
-                    } else {
-                        format!("exit {}", status.code().unwrap_or(-1))
-                    };
-                    UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: Some(msg) }
-                }
-            }
-            Err(_) if is_default_cmd => {
+            c
+        }
+    };
+    match run_command_timeout(cmd, std::time::Duration::from_secs(15)) {
+        Ok((status, stdout, stderr)) => {
+            let out = strip_ansi(&String::from_utf8_lossy(&stdout)).trim().to_string();
+            let err = strip_ansi(&String::from_utf8_lossy(&stderr)).trim().to_string();
+            if status.success() && (!out.is_empty() || !err.is_empty()) {
+                let raw = if out.is_empty() { &err } else { &out };
+                let (output, detail) = format_usage_output(raw, &tool_id);
+                UsageResult::new(tool_id, output, detail, None)
+            } else if is_default_cmd {
+                // プリセットのコマンド（npx ccusage など）が使えない環境・オフライン時はローカルログの集計にフォールバックする
                 let (output, detail) = collect_local_usage(&tool_id);
-                UsageResult { id: tool_id, output, detail, error: None }
+                UsageResult::new(tool_id, output, detail, None)
+            } else {
+                let msg = if !err.is_empty() {
+                    err
+                } else if !out.is_empty() {
+                    out
+                } else {
+                    format!("exit {}", status.code().unwrap_or(-1))
+                };
+                UsageResult::new(tool_id, String::new(), String::new(), Some(msg))
             }
-            Err(e) => UsageResult { id: tool_id, output: String::new(), detail: String::new(), error: Some(e) },
         }
-    })
-    .await
-    .unwrap_or_else(|e| UsageResult { id: String::new(), output: String::new(), detail: String::new(), error: Some(e.to_string()) })
+        Err(_) if is_default_cmd => {
+            let (output, detail) = collect_local_usage(&tool_id);
+            UsageResult::new(tool_id, output, detail, None)
+        }
+        Err(e) => UsageResult::new(tool_id, String::new(), String::new(), Some(e)),
+    }
 }
 
 #[cfg(test)]
@@ -1028,6 +1083,21 @@ mod tests {
         assert_eq!(f.tools[1].kind, "ide");
         // 移行済みなら何もしない
         assert!(!migrate(&mut f));
+    }
+
+    #[test]
+    fn codex_rate_limits() {
+        let rl: serde_json::Value = serde_json::from_str(
+            r#"{"primary":{"used_percent":12.5,"window_minutes":300,"resets_in_seconds":600},
+                "secondary":{"used_percent":40.0,"window_minutes":10080,"resets_at":99999}}"#,
+        )
+        .unwrap();
+        let p = codex_limit(&rl["primary"], Some(1000)).unwrap();
+        assert_eq!((p.window_minutes, p.used_percent, p.resets_at), (300, 12.5, Some(1600)));
+        let s = codex_limit(&rl["secondary"], None).unwrap();
+        assert_eq!((s.window_minutes, s.resets_at), (10080, Some(99999)));
+        // 行の時刻がなければ resets_in_seconds からは求めない
+        assert_eq!(codex_limit(&rl["primary"], None).unwrap().resets_at, None);
     }
 
     #[test]

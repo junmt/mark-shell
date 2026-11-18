@@ -7,6 +7,11 @@ fn main() {
         mark_shell_lib::print_ai_context();
         return;
     }
+    // Claude Code のステータスラインから呼ばれたときは、残量を記録して 1 行出力して終わる
+    if std::env::args().nth(1).as_deref() == Some("--statusline") {
+        mark_shell_lib::print_statusline();
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--ai-usage") {
         let id = std::env::args().nth(2).unwrap_or_else(|| "antigravity".into());
         mark_shell_lib::print_ai_usage(&id);

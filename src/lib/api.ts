@@ -1,6 +1,7 @@
 // Rust 側のコマンドの呼び出し
 
 import { invoke, Channel } from '@tauri-apps/api/core';
+import type { UsageLimit } from './usage';
 
 export type Entry = { path: string; dir: boolean; mtime: number; size: number };
 export type Change =
@@ -40,7 +41,18 @@ export type ToolInfo = {
   usageCommand: string | null;
   actions: { id: string; label: string }[];
 };
-export type UsageResult = { id: string; output: string; detail: string; error: string | null };
+export type UsageResult = {
+  id: string;
+  output: string;
+  detail: string;
+  error: string | null;
+  /** あとどれくらい使えるか（取れないツールは空） */
+  limits: UsageLimit[];
+  /** limits を記録した時刻（UNIX 秒） */
+  limitsUpdatedAt: number | null;
+  /** limits が取れないときの理由 */
+  limitsNote: string | null;
+};
 
 export type AiSelection = { fromLine: number; toLine: number; text: string };
 

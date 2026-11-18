@@ -6,6 +6,7 @@ mod git;
 mod memory;
 mod protocol;
 mod pty;
+mod rate_limits;
 mod search;
 mod session;
 mod shells;
@@ -28,6 +29,11 @@ pub fn print_ai_context() {
 /// `mark-shell.exe --ai-usage <id>` の処理
 pub fn print_ai_usage(tool_id: &str) {
     ai_tools::print_for_usage(tool_id);
+}
+
+/// `mark-shell.exe --statusline`（Claude Code のステータスライン）の処理
+pub fn print_statusline() {
+    rate_limits::print_for_statusline();
 }
 
 /// `mark-shell.exe --unregister-cli`（アンインストーラー）の処理

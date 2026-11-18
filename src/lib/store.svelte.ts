@@ -35,6 +35,7 @@ import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInsi
 import { buildTree, flatten, type TreeNode } from './tree';
 import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type TermLayout } from './termLayout';
 import { git, type GitTab } from './git.svelte';
+import type { UsageLimit } from './usage';
 
 const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
 
@@ -135,6 +136,9 @@ export type AiUsageState = {
   error: string | null;
   loading: boolean;
   updatedAt: number | null;
+  limits: UsageLimit[];
+  limitsUpdatedAt: number | null;
+  limitsNote: string | null;
 };
 
 class Store {
@@ -392,6 +396,9 @@ class Store {
         error: prev?.error ?? null,
         loading: true,
         updatedAt: prev?.updatedAt ?? null,
+        limits: prev?.limits ?? [],
+        limitsUpdatedAt: prev?.limitsUpdatedAt ?? null,
+        limitsNote: prev?.limitsNote ?? null,
       });
     }
     try {
@@ -405,6 +412,9 @@ class Store {
               error: res.error,
               loading: false,
               updatedAt: Date.now(),
+              limits: res.limits,
+              limitsUpdatedAt: res.limitsUpdatedAt,
+              limitsNote: res.limitsNote,
             });
           } catch (e) {
             this.aiUsage.set(tool.id, {
@@ -413,6 +423,9 @@ class Store {
               error: errorMessage(e),
               loading: false,
               updatedAt: Date.now(),
+              limits: [],
+              limitsUpdatedAt: null,
+              limitsNote: null,
             });
           }
         }),

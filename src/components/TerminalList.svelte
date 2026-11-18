@@ -4,6 +4,7 @@
   import { tr } from '../lib/i18n.svelte';
   import { keysOf } from '../lib/termLayout';
   import type { ToolInfo } from '../lib/api';
+  import { level, remainingPercent, resetText, staleText, windowLabel } from '../lib/usage';
 
   // 左ペインの下側に並べるターミナルの一覧と、その下の各 AI の Usage 表示
 
@@ -28,8 +29,21 @@
     return () => clearInterval(id);
   });
 
+  // 回復までの時間の表示を進める（UNIX 秒）
+  let now = $state(Math.floor(Date.now() / 1000));
+  $effect(() => {
+    const id = setInterval(() => (now = Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(id);
+  });
+
   function usageTooltip(tool: ToolInfo, cmd: string, state: AiUsageState | undefined): string {
-    const lines = [tool.name, `${tr('コマンド', 'Command', '命令')}: ${cmd}`];
+    const lines = [tool.name];
+    for (const l of state?.limits ?? []) {
+      const rem = Math.round(remainingPercent(l, now));
+      const reset = resetText(l, now);
+      lines.push(`${windowLabel(l.windowMinutes)}: ${tr(`残り ${rem}%`, `${rem}% left`, `剩余 ${rem}%`)}${reset ? ` — ${reset}` : ''}`);
+    }
+    lines.push(`${tr('コマンド', 'Command', '命令')}: ${cmd}`);
     if (state?.error) lines.push(state.error);
     else if (state?.detail) lines.push(state.detail);
     else if (state?.output) lines.push(state.output);
@@ -187,19 +201,49 @@
     </div>
     <div class="usage-items">
       {#each usageItems as { tool, cmd, state } (tool.id)}
-        <div class="usage-row" title={usageTooltip(tool, cmd, state)}>
-          <span class="usage-tool">
-            <span class="usage-icon"><Icon name="sparkle" size={12} /></span>
-            <span class="usage-name">{tool.name}</span>
-          </span>
-          {#if state?.error}
-            <span class="usage-val error">{state.error}</span>
-          {:else if state?.output}
-            <span class="usage-val">{state.output}</span>
-          {:else if state?.loading}
-            <span class="usage-val muted">…</span>
-          {:else}
-            <span class="usage-val muted">—</span>
+        <div class="usage-block" title={usageTooltip(tool, cmd, state)}>
+          <div class="usage-row">
+            <span class="usage-tool">
+              <span class="usage-icon"><Icon name="sparkle" size={12} /></span>
+              <span class="usage-name">{tool.name}</span>
+            </span>
+            {#if state?.error}
+              <span class="usage-val error">{state.error}</span>
+            {:else if state?.output}
+              <span class="usage-val">{state.output}</span>
+            {:else if state?.loading}
+              <span class="usage-val muted">…</span>
+            {:else if !state?.limits.length}
+              <span class="usage-val muted">—</span>
+            {/if}
+          </div>
+          {#if state?.limits.length}
+            <div class="limits">
+              {#each state.limits as l (l.windowMinutes)}
+                {@const rem = remainingPercent(l, now)}
+                <span class="limit-name">{windowLabel(l.windowMinutes)}</span>
+                <span
+                  class="bar"
+                  role="meter"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(rem)}
+                  aria-label={windowLabel(l.windowMinutes)}
+                >
+                  <span class="fill {level(rem)}" style:width="{rem}%"></span>
+                </span>
+                <span class="limit-pct {level(rem)}">{tr(`残り ${Math.round(rem)}%`, `${Math.round(rem)}% left`, `剩余 ${Math.round(rem)}%`)}</span>
+                {#if l.resetsAt !== null}
+                  <span class="limit-reset">{resetText(l, now)}</span>
+                {/if}
+              {/each}
+            </div>
+            {@const stale = staleText(state.limitsUpdatedAt, now)}
+            {#if stale}
+              <div class="limit-note">{stale}</div>
+            {/if}
+          {:else if state?.limitsNote}
+            <div class="limit-note">{state.limitsNote}</div>
           {/if}
         </div>
       {/each}
@@ -417,6 +461,88 @@
     gap: 8px;
     font-size: 12px;
     padding: 2px 2px;
+  }
+
+  .usage-block {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-bottom: 3px;
+  }
+
+  .usage-block + .usage-block {
+    border-top: 1px dashed var(--border);
+    padding-top: 5px;
+  }
+
+  /* 枠の名前 | バー | 残り%。回復までの時間はバーの下 */
+  .limits {
+    display: grid;
+    grid-template-columns: auto minmax(40px, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 1px;
+    padding-left: 19px;
+    font-size: 11px;
+  }
+
+  .limit-name {
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+
+  .bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--bg-hover);
+    overflow: hidden;
+  }
+
+  .fill {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+
+  .fill.ok {
+    background: #2da44e;
+  }
+
+  .fill.warn {
+    background: #d29922;
+  }
+
+  .fill.low {
+    background: var(--danger);
+  }
+
+  .limit-pct {
+    font-weight: 600;
+    white-space: nowrap;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .limit-pct.warn {
+    color: #d29922;
+  }
+
+  .limit-pct.low {
+    color: var(--danger);
+  }
+
+  .limit-reset {
+    grid-column: 2 / 4;
+    margin-bottom: 3px;
+    color: var(--fg-muted);
+    font-size: 10.5px;
+  }
+
+  .limit-note {
+    padding-left: 19px;
+    font-size: 10.5px;
+    color: var(--fg-muted);
   }
 
   .usage-tool {

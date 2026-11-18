@@ -1,6 +1,6 @@
 [package]
 name = "mark-shell"
-version = "0.2.2"
+version = "0.2.3"
 description = "Markdown メモとシェルで AI を使えるデスクトップアプリ"
 edition = "2021"
 
