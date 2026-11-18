@@ -2,6 +2,7 @@
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api } from '../lib/api';
   import { tr } from '../lib/i18n.svelte';
+  import Clock from './Clock.svelte';
   import Icon from './Icon.svelte';
 
   function openFolderMenu(e: MouseEvent) {
@@ -66,6 +67,7 @@
       <Icon name="sparkle" /><span>AI</span><Icon name="chevronDown" size={12} stroke={2} />
     </button>
   {/if}
+  <Clock />
   <button class="icon-btn" title={tr('設定 (Ctrl+,)', 'Settings (Ctrl+,)', '设置 (Ctrl+,)')} onclick={() => (store.settingsOpen = true)}>
     <Icon name="settings" />
   </button>
