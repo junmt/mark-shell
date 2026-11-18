@@ -6,7 +6,8 @@
 //!   `%LOCALAPPDATA%\mark-shell\claude-rate-limits.json` に記録し、AI Usage の表示で読む。
 //!   ユーザーが自分でステータスラインを設定しているときは、上書きしないよう登録しない。
 //! - Codex: セッションログ（~/.codex/sessions）の `rate_limits` を読む（ai_tools.rs）
-//! - Antigravity: `agy -p /usage` の出力を読む（ai_tools.rs）
+//! - Claude Code・Antigravity: スラッシュコマンド /usage を印刷モード（`claude -p /usage`、`agy -p /usage`）で実行して読む（ai_tools.rs）。
+//!   Claude Code で /usage が使えないときは、上のステータスラインの記録を使う
 
 use std::path::PathBuf;
 

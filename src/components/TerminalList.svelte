@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store, type AiUsageState, type MenuItem, type TermSession } from '../lib/store.svelte';
   import Icon from './Icon.svelte';
+  import Splitter from './Splitter.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { keysOf } from '../lib/termLayout';
   import type { ToolInfo } from '../lib/api';
@@ -48,6 +49,13 @@
     else if (state?.detail) lines.push(state.detail);
     else if (state?.output) lines.push(state.output);
     return lines.join('\n');
+  }
+
+  // AI Usage の高さ（境界をドラッグして変える。中身より低いとスクロールする）
+  let usageEl: HTMLDivElement | undefined = $state();
+  function resizeUsage(d: number) {
+    const cur = store.usageHeight ?? usageEl?.clientHeight ?? 120;
+    store.usageHeight = Math.min(Math.max(50, cur - d), 800);
   }
 
   function newMenu(e: MouseEvent) {
@@ -173,7 +181,9 @@
     </div>
   </div>
 
-  <div class="usage" aria-label={tr('AI Usage', 'AI Usage', 'AI 用量')}>
+  <Splitter direction="horizontal" onresize={resizeUsage} ondone={() => store.saveWorkspaceState()} />
+
+  <div class="usage" bind:this={usageEl} style:height={store.usageHeight === null ? undefined : `${store.usageHeight}px`} aria-label={tr('AI Usage', 'AI Usage', 'AI 用量')}>
     <div class="header usage-header">
       <span class="label">AI Usage</span>
       <div class="spacer"></div>
@@ -438,7 +448,7 @@
 
   .usage {
     flex: none;
-    border-top: 1px solid var(--border);
+    min-height: 0;
     display: flex;
     flex-direction: column;
   }
@@ -448,6 +458,9 @@
   }
 
   .usage-items {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     padding: 3px 8px 6px;
     display: flex;
     flex-direction: column;

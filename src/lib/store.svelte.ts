@@ -181,6 +181,8 @@ class Store {
   terminalHeight = $state(260);
   /** 左ペインの下側に並べるターミナル一覧の高さ */
   terminalListHeight = $state(180);
+  /** 左ペインの下側の AI Usage の高さ。null は中身に合わせる */
+  usageHeight = $state<number | null>(null);
 
   // ---- 設定 ----
   config = $state<Config>(structuredClone(defaultConfig));
@@ -578,6 +580,7 @@ class Store {
       this.savedGitRepo = ws.gitRepo ?? null;
       this.terminalHeight = ws.terminalHeight ?? this.terminalHeight;
       this.terminalListHeight = ws.terminalListHeight ?? this.terminalListHeight;
+      this.usageHeight = ws.usageHeight ?? this.usageHeight;
       this.terminalVisible = ws.terminalVisible ?? false;
       for (const t of ws.tabs ?? []) {
         await this.openFile(t.path, { pin: true, mode: t.mode, quiet: true });
@@ -677,6 +680,7 @@ class Store {
       leftView: this.leftView,
       terminalHeight: this.terminalHeight,
       terminalListHeight: this.terminalListHeight,
+      usageHeight: this.usageHeight,
       terminalVisible: this.terminalVisible,
       gitRepo: git.repoPath,
       languages: this.languageOverrides,
@@ -1942,6 +1946,7 @@ type WorkspaceState = {
   leftView?: LeftView;
   terminalHeight?: number;
   terminalListHeight?: number;
+  usageHeight?: number | null;
   terminalVisible?: boolean;
   gitRepo?: string | null;
   languages?: Record<string, string>;

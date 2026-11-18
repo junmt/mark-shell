@@ -221,19 +221,24 @@ impl UsageResult {
 /// ツールごとに、あとどれくらい使えるかを足す
 fn with_limits(mut r: UsageResult) -> UsageResult {
     match r.id.as_str() {
-        "claude-code" => match crate::rate_limits::read_claude() {
-            Some(rec) => {
+        "claude-code" => match (claude_limits(), crate::rate_limits::read_claude()) {
+            (Ok((limits, at)), _) => {
+                r.limits = limits;
+                r.limits_updated_at = Some(at);
+            }
+            // /usage が使えないときは、ステータスラインで記録した値を使う
+            (Err(_), Some(rec)) => {
                 r.limits = rec.limits;
                 r.limits_updated_at = Some(rec.updated_at);
             }
-            None if crate::rate_limits::user_has_statusline() => {
+            (Err(_), None) if crate::rate_limits::user_has_statusline() => {
                 r.limits_note = Some(tr!(
                     "ステータスラインを自分で設定しているため、残りを取得できません",
                     "Remaining usage is unavailable because you set your own status line",
                     "由于你自行设置了状态栏，无法获取剩余用量"
                 ));
             }
-            None => {
+            (Err(_), None) => {
                 r.limits_note = Some(tr!(
                     "mark-shell のターミナルで Claude Code を使うと、残りを表示します",
                     "Use Claude Code in a mark-shell terminal to show the remaining usage",
@@ -258,38 +263,41 @@ fn with_limits(mut r: UsageResult) -> UsageResult {
     r
 }
 
-/// `agy -p /usage` の結果を使い回す時間。agy の起動に数秒かかるので、Usage の更新ごとには呼ばない
-const AGY_USAGE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+/// `<cli> -p /usage` の結果を使い回す時間。CLI の起動に数秒かかるので、Usage の更新ごとには呼ばない
+const SLASH_USAGE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
-type AgyUsageCache = Option<(std::time::Instant, Result<(Vec<crate::rate_limits::Limit>, u64), String>)>;
+/// 残り（枠ごとの使用率と回復時刻）と、取得した時刻（UNIX 秒）
+type LimitsResult = Result<(Vec<crate::rate_limits::Limit>, u64), String>;
+type LimitsCache = std::sync::Mutex<Option<(std::time::Instant, LimitsResult)>>;
 
-/// Antigravity の残り（枠ごとの使用率と回復時刻）と、取得した時刻（UNIX 秒）。結果は 5 分間使い回す
-fn antigravity_limits() -> Result<(Vec<crate::rate_limits::Limit>, u64), String> {
-    static CACHE: std::sync::Mutex<AgyUsageCache> = std::sync::Mutex::new(None);
-    // 取得中はロックを持ったままにして、同時に何度も agy を起動しない
-    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+/// 取得結果を 5 分間使い回す。取得中はロックを持ったままにして、同時に何度も CLI を起動しない
+fn cached_limits(cache: &LimitsCache, fetch: fn() -> LimitsResult) -> LimitsResult {
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, res)) = cache.as_ref() {
-        if at.elapsed() < AGY_USAGE_TTL {
+        if at.elapsed() < SLASH_USAGE_TTL {
             return res.clone();
         }
     }
-    let res = fetch_antigravity_limits();
+    let res = fetch();
     *cache = Some((std::time::Instant::now(), res.clone()));
     res
 }
 
-/// Antigravity CLI のスラッシュコマンド /usage を印刷モード（`agy -p /usage`）で実行して残りを読む
-fn fetch_antigravity_limits() -> Result<(Vec<crate::rate_limits::Limit>, u64), String> {
-    let unavailable = || {
-        tr!(
-            "Antigravity CLI（agy）にログインすると、残りを表示します",
-            "Sign in to Antigravity CLI (agy) to show the remaining usage",
-            "登录 Antigravity CLI（agy）后，会显示剩余用量"
-        )
-    };
-    let (_, path) = find("antigravity").map_err(|_| unavailable())?;
+fn antigravity_limits() -> LimitsResult {
+    static CACHE: LimitsCache = std::sync::Mutex::new(None);
+    cached_limits(&CACHE, fetch_antigravity_limits)
+}
+
+fn claude_limits() -> LimitsResult {
+    static CACHE: LimitsCache = std::sync::Mutex::new(None);
+    cached_limits(&CACHE, fetch_claude_limits)
+}
+
+/// AI ツールの CLI を引数つきでウィンドウを出さずに実行し、成功したときの標準出力を返す
+fn run_tool_cli(tool_id: &str, args: &[&str]) -> Option<String> {
+    let (_, path) = find(tool_id).ok()?;
     let mut cmd = std::process::Command::new(path);
-    cmd.args(["-p", "/usage"]);
+    cmd.args(args);
     cmd.current_dir(dirs::home_dir().unwrap_or_else(std::env::temp_dir));
     cmd.env("NO_COLOR", "1");
     #[cfg(windows)]
@@ -297,10 +305,105 @@ fn fetch_antigravity_limits() -> Result<(Vec<crate::rate_limits::Limit>, u64), S
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let (status, out, _) = run_command_timeout(cmd, std::time::Duration::from_secs(30))?;
-    let limits = parse_agy_usage(&strip_ansi(&String::from_utf8_lossy(&out)));
-    if !status.success() || limits.is_empty() {
-        return Err(unavailable());
+    let (status, out, _) = run_command_timeout(cmd, std::time::Duration::from_secs(30)).ok()?;
+    status.success().then(|| strip_ansi(&String::from_utf8_lossy(&out)))
+}
+
+/// Claude Code のスラッシュコマンド /usage を印刷モードで実行して残りを読む。
+/// `--no-session-persistence` で、実行のたびに会話の記録（~/.claude/projects）が増えないようにする
+fn fetch_claude_limits() -> LimitsResult {
+    let out = run_tool_cli("claude-code", &["-p", "/usage", "--no-session-persistence"]).unwrap_or_default();
+    let now = chrono::Local::now();
+    let limits = parse_claude_usage(&out, now);
+    if limits.is_empty() {
+        return Err(String::new());
+    }
+    Ok((limits, now.timestamp().max(0) as u64))
+}
+
+/// `claude -p /usage` の出力を読む。例:
+/// `Current session: 7% used · resets Nov 18, 3pm (Asia/Tokyo)`
+/// `Current week (all models): 8% used · resets Nov 23, 8am (Asia/Tokyo)`
+/// `Current week (Fable): 0% used · resets Nov 23, 8am (Asia/Tokyo)`
+fn parse_claude_usage<Tz: chrono::TimeZone>(text: &str, now: chrono::DateTime<Tz>) -> Vec<crate::rate_limits::Limit> {
+    let re = regex::Regex::new(r"^\s*Current\s+(session|week|day)\s*(?:\(([^)]*)\))?\s*:\s*(\d+(?:\.\d+)?)%\s*used(?:.*?\bresets\s+(.+))?$").unwrap();
+    text.lines()
+        .filter_map(|line| {
+            let c = re.captures(line)?;
+            let window_minutes = match &c[1] {
+                "session" => crate::rate_limits::FIVE_HOURS,
+                "week" => crate::rate_limits::SEVEN_DAYS,
+                _ => 1440,
+            };
+            let label = c.get(2).map(|m| m.as_str().trim()).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all models"));
+            Some(crate::rate_limits::Limit {
+                window_minutes,
+                used_percent: c[3].parse().ok()?,
+                resets_at: c.get(4).and_then(|m| parse_claude_reset(m.as_str(), &now)),
+                label: label.map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+/// 「Nov 18, 3pm (Asia/Tokyo)」「3:30pm (Asia/Tokyo)」のような回復時刻を UNIX 秒にする。
+/// 年は書かれていないので、いまより前になるなら翌年（日付がないときは翌日）とみなす。
+/// タイムゾーンは Claude Code が PC のタイムゾーンで出すので、now と同じとみなす
+fn parse_claude_reset<Tz: chrono::TimeZone>(s: &str, now: &chrono::DateTime<Tz>) -> Option<u64> {
+    use chrono::{Datelike, Duration, NaiveDate};
+    let re = regex::Regex::new(r"(?i)^(?:([A-Z][a-z]{2})[a-z]*\.?\s+(\d{1,2}),?\s*(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)").unwrap();
+    let c = re.captures(s.trim())?;
+    let mut hour: u32 = c[3].parse().ok()?;
+    let minute: u32 = c.get(4).map_or(Some(0), |m| m.as_str().parse().ok())?;
+    let pm = c[5].eq_ignore_ascii_case("pm");
+    if hour == 12 {
+        hour = 0;
+    }
+    if pm {
+        hour += 12;
+    }
+    let tz = now.timezone();
+    let local_now = now.naive_local();
+    let at = |date: NaiveDate| {
+        let naive = date.and_hms_opt(hour, minute, 0)?;
+        tz.from_local_datetime(&naive).earliest()
+    };
+    let t = match (c.get(1), c.get(2)) {
+        (Some(mon), Some(day)) => {
+            let month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+                .iter()
+                .position(|m| m.eq_ignore_ascii_case(mon.as_str()))? as u32
+                + 1;
+            let day: u32 = day.as_str().parse().ok()?;
+            let this_year = at(NaiveDate::from_ymd_opt(local_now.year(), month, day)?)?;
+            // 年末に年明けの日付が出たときは翌年
+            if this_year.clone() + Duration::days(31) < *now {
+                at(NaiveDate::from_ymd_opt(local_now.year() + 1, month, day)?)?
+            } else {
+                this_year
+            }
+        }
+        _ => {
+            let today = at(local_now.date())?;
+            if today < *now {
+                at(local_now.date().succ_opt()?)?
+            } else {
+                today
+            }
+        }
+    };
+    u64::try_from(t.timestamp()).ok()
+}
+
+/// Antigravity CLI のスラッシュコマンド /usage を印刷モード（`agy -p /usage`）で実行して残りを読む
+fn fetch_antigravity_limits() -> LimitsResult {
+    let limits = parse_agy_usage(&run_tool_cli("antigravity", &["-p", "/usage"]).unwrap_or_default());
+    if limits.is_empty() {
+        return Err(tr!(
+            "Antigravity CLI（agy）にログインすると、残りを表示します",
+            "Sign in to Antigravity CLI (agy) to show the remaining usage",
+            "登录 Antigravity CLI（agy）后，会显示剩余用量"
+        ));
     }
     Ok((limits, now_secs()))
 }
@@ -1308,6 +1411,33 @@ mod tests {
         let data = [pb_m(2, b""), pb_m(1, &meta), pb_m(4, b"a3ae5d3f")].concat();
         assert_eq!(antigravity_generation(&data), Some((1677 + 202 + 16264, Some(1_781_180_185))));
         assert_eq!(antigravity_generation(b"\xff\xff"), None);
+    }
+
+    #[test]
+    fn claude_usage_output() {
+        use chrono::TimeZone;
+        let jst = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+        let now = jst.with_ymd_and_hms(2026, 11, 18, 12, 20, 0).unwrap();
+        let ts = |m, d, h, mi| jst.with_ymd_and_hms(2026, m, d, h, mi, 0).unwrap().timestamp() as u64;
+        let out = "You are currently using your subscription to power your Claude Code usage\n\n\
+                   Current session: 7% used · resets Nov 18, 3pm (Asia/Tokyo)\n\
+                   Current week (all models): 8.5% used · resets Nov 23, 8am (Asia/Tokyo)\n\
+                   Current week (Fable): 0% used · resets Nov 23, 12:30am (Asia/Tokyo)\n\n\
+                   Last 24h · 138 requests · 2 sessions\n  47%  Start fresh when you switch tasks · run /clear\n";
+        let l = parse_claude_usage(out, now);
+        assert_eq!(l.len(), 3);
+        assert_eq!((l[0].window_minutes, l[0].used_percent, l[0].resets_at, l[0].label.as_deref()), (300, 7.0, Some(ts(11, 18, 15, 0)), None));
+        assert_eq!((l[1].window_minutes, l[1].used_percent, l[1].resets_at, l[1].label.as_deref()), (10080, 8.5, Some(ts(11, 23, 8, 0)), None));
+        assert_eq!((l[2].resets_at, l[2].label.as_deref()), (Some(ts(11, 23, 0, 30)), Some("Fable")));
+        // 日付のない時刻（過ぎていれば翌日）と、年明けの日付（翌年）
+        assert_eq!(parse_claude_reset("11am (Asia/Tokyo)", &now), Some(ts(11, 19, 11, 0)));
+        assert_eq!(parse_claude_reset("12pm", &now), Some(ts(11, 18, 12, 0) + 86400));
+        let dec = jst.with_ymd_and_hms(2026, 12, 30, 10, 0, 0).unwrap();
+        assert_eq!(
+            parse_claude_reset("Jan 2, 9am", &dec),
+            Some(jst.with_ymd_and_hms(2027, 1, 2, 9, 0, 0).unwrap().timestamp() as u64)
+        );
+        assert!(parse_claude_usage("Error: not logged in", now).is_empty());
     }
 
     #[test]
