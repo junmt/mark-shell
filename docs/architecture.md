@@ -114,6 +114,7 @@ mark-shell.exe（Windows）                        WSL（Linux）
 | `%LOCALAPPDATA%\mark-shell\recent.json` | 最近開いたディレクトリ |
 | `%LOCALAPPDATA%\mark-shell\recovery\` | 異常終了に備えた編集中の内容 |
 | `%LOCALAPPDATA%\mark-shell\windows\<プロセス ID>.json` | ウィンドウごとの開いているディレクトリと閉じた時刻。次の起動で、同時に閉じたウィンドウをまとめて復元するのに使う |
+| `%LOCALAPPDATA%\mark-shell\windows\update-restart.json` | アップデートのインストール直前に、開いているすべてのウィンドウのディレクトリを書く。再起動後にそれらを開き直したら消す（10 分より古いものは使わない） |
 | `%LOCALAPPDATA%\mark-shell\logs\` | ログ（7 日分をローテーション）。ノートの本文はログに書かない |
 
 いずれも JSON またはプレーンテキストで、消してもアプリは初期状態で起動する。

@@ -37,7 +37,13 @@ import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type 
 import { git, type GitTab } from './git.svelte';
 import type { UsageLimit } from './usage';
 
-const RELEASES_URL = 'https://github.com/junmt/mark-shell/releases/latest';
+/** 同じフォルダか（大文字小文字・区切り文字・末尾の区切りを無視する） */
+function samePath(a: string, b: string): boolean {
+  const n = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  return n(a) === n(b);
+}
+
+const RELEASES_URL ='https://github.com/junmt/mark-shell/releases/latest';
 
 export type Mode = 'edit' | 'preview' | 'split';
 export type LeftView = 'files' | 'search' | 'outline' | 'git';
@@ -344,7 +350,9 @@ class Store {
     // 複数のウィンドウを同時に閉じていたら、それらをすべて開き直す（2 つ目からは新しいウィンドウで）。
     // エクスプローラーの右クリックからファイルを指定されたら、そのフォルダを開いてファイルを表示する
     const launch = await api.getLaunchTarget();
-    const restore = launch ? [] : await api.takeRestoreWindows().catch(() => [] as string[]);
+    // 更新で再起動したときは、起動引数があっても更新前のウィンドウをすべて開き直す（引数と同じフォルダは除く）
+    let restore = await api.takeRestoreWindows(!!launch).catch(() => [] as string[]);
+    if (launch) restore = [launch.root, ...restore.filter((r) => !samePath(r, launch.root))];
     for (const p of restore.slice(1)) void api.openNewWindow(p).catch(() => {});
     this.recent = await api.getRecent();
     const target = launch?.root ?? restore[0] ?? this.recent[0];
@@ -503,8 +511,16 @@ class Store {
     this.saveWorkspaceStateNow();
     this.toast(tr(`バージョン ${update.version} をダウンロードしています…`, `Downloading version ${update.version}…`, `正在下载版本 ${update.version}…`));
     try {
-      // Windows ではインストーラーが動くとアプリは終了し、入れ替え後に起動し直す
-      await update.downloadAndInstall();
+      // Windows ではインストーラーが動くとアプリは終了し（ほかのウィンドウも閉じられる）、入れ替え後に起動し直す。
+      // 起動し直したときにすべてのウィンドウを開き直せるよう、インストールの直前に開いているフォルダを記録する
+      await update.download();
+      await api.markUpdateRestart();
+      try {
+        await update.install();
+      } catch (e) {
+        await api.cancelUpdateRestart().catch(() => {});
+        throw e;
+      }
       await relaunch();
     } catch (e) {
       const msg = errorMessage(e);

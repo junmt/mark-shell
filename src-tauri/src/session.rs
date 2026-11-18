@@ -122,17 +122,116 @@ fn pick(mut closed: Vec<(String, u64)>) -> Vec<String> {
     closed.sort_by_key(|c| std::cmp::Reverse(c.1));
     let mut roots: Vec<String> = Vec::new();
     for (root, _) in closed {
-        if !roots.iter().any(|r| r.eq_ignore_ascii_case(&root)) {
-            roots.push(root);
-        }
+        push_unique(&mut roots, root);
     }
     roots
 }
 
-/// 前回まとめて閉じたウィンドウのフォルダ（最後に閉じたものが先頭）。ほかの mark-shell が動いていれば空。
-/// 返したものを含め、閉じたウィンドウの記録は消す
+fn push_unique(roots: &mut Vec<String>, root: String) {
+    if !roots.iter().any(|r| r.eq_ignore_ascii_case(&root)) {
+        roots.push(root);
+    }
+}
+
+/// 記録ファイルの pid（記録ファイルでなければ None）
+fn record_pid(path: &Path) -> Option<u32> {
+    path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<u32>().ok())
+}
+
+/// 更新で再起動するときに開き直すウィンドウの記録
+fn update_marker() -> PathBuf {
+    dir().join("update-restart.json")
+}
+
+/// 更新の記録がこれより古ければ使わない（インストールが取り消されたときなど）
+const UPDATE_MARKER_TTL_MS: u64 = 10 * 60 * 1000;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateMarker {
+    roots: Vec<String>,
+    created_at: u64,
+}
+
+/// 更新のインストール直前に呼ぶ。いま開いているすべてのウィンドウのフォルダを記録し、再起動後にまとめて開き直す。
+/// Windows ではインストーラーがほかのウィンドウを強制終了し、更新したウィンドウも閉じた時刻を書かずに
+/// 終わる（さらに起動引数を引き継いで起動し直す）ので、通常の復元では 1 つしか戻らない。
+/// macOS などでは、更新してもほかのウィンドウ（プロセス）は閉じられないので何もしない
 #[tauri::command]
-pub fn take_restore_windows() -> Vec<String> {
+pub fn mark_update_restart() {
+    if !cfg!(windows) {
+        return;
+    }
+    let own = std::process::id();
+    let mut roots = Vec::new();
+    if let Some(rec) = read(&own_path()) {
+        push_unique(&mut roots, rec.root);
+    }
+    if let Ok(entries) = fs::read_dir(dir()) {
+        for e in entries.flatten() {
+            let path = e.path();
+            let Some(pid) = record_pid(&path) else { continue };
+            if pid == own {
+                continue;
+            }
+            if let Some(rec) = read(&path) {
+                if rec.closed_at.is_none() && is_running_mark_shell(pid) {
+                    push_unique(&mut roots, rec.root);
+                }
+            }
+        }
+    }
+    let _ = fs::create_dir_all(dir());
+    if let Ok(s) = serde_json::to_vec(&UpdateMarker { roots, created_at: now_ms() }) {
+        let _ = write_atomic(&update_marker(), &s);
+    }
+}
+
+/// 更新のインストールに失敗したとき、記録を取り消す
+#[tauri::command]
+pub fn cancel_update_restart() {
+    let _ = fs::remove_file(update_marker());
+}
+
+/// 更新の記録があれば取り出す（記録は消す）
+fn take_update_marker() -> Option<Vec<String>> {
+    let path = update_marker();
+    let marker: Option<UpdateMarker> = fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let _ = fs::remove_file(&path);
+    let marker = marker?;
+    (now_ms().saturating_sub(marker.created_at) <= UPDATE_MARKER_TTL_MS).then_some(marker.roots)
+}
+
+/// 動いていない mark-shell の記録を消す
+fn remove_stale_records() {
+    let own = std::process::id();
+    let Ok(entries) = fs::read_dir(dir()) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        let Some(pid) = record_pid(&path) else { continue };
+        if pid != own && !is_running_mark_shell(pid) {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// 起動時に開き直すウィンドウのフォルダ。
+/// - 更新で再起動したときは、更新前に開いていたすべてのウィンドウ（更新したウィンドウが先頭）。
+///   `launched`（コマンドラインで指定された）でも返すので、呼び出し側で重複を除く
+/// - それ以外で `launched` なら空
+/// - それ以外は、前回まとめて閉じたウィンドウのフォルダ（最後に閉じたものが先頭）。ほかの mark-shell が動いていれば空。
+///   返したものを含め、閉じたウィンドウの記録は消す
+#[tauri::command]
+pub fn take_restore_windows(launched: bool) -> Vec<String> {
+    if let Some(roots) = take_update_marker() {
+        remove_stale_records();
+        return roots.into_iter().filter(|r| Path::new(r).is_dir()).collect();
+    }
+    if launched {
+        return Vec::new();
+    }
     let own = std::process::id();
     let Ok(entries) = fs::read_dir(dir()) else {
         return Vec::new();

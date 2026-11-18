@@ -131,6 +131,8 @@ pub fn run() {
             workspace::is_installed,
             workspace::open_with_default_app,
             session::take_restore_windows,
+            session::mark_update_restart,
+            session::cancel_update_restart,
             search::search_start,
             search::search_cancel,
             search::replace_in_files,
