@@ -6,6 +6,7 @@
 //!   `%LOCALAPPDATA%\mark-shell\claude-rate-limits.json` に記録し、AI Usage の表示で読む。
 //!   ユーザーが自分でステータスラインを設定しているときは、上書きしないよう登録しない。
 //! - Codex: セッションログ（~/.codex/sessions）の `rate_limits` を読む（ai_tools.rs）
+//! - Antigravity: `agy -p /usage` の出力を読む（ai_tools.rs）
 
 use std::path::PathBuf;
 
@@ -26,6 +27,9 @@ pub struct Limit {
     pub used_percent: f64,
     /// 枠がリセットされる時刻（UNIX 秒）
     pub resets_at: Option<u64>,
+    /// 同じ長さの枠が複数あるときの見分け（Antigravity の「Gemini」「Claude/GPT」など）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -58,6 +62,7 @@ pub fn parse_statusline(input: &Value) -> Vec<Limit> {
                 window_minutes: minutes,
                 used_percent: w.get("used_percentage")?.as_f64()?,
                 resets_at: w.get("resets_at").and_then(Value::as_u64),
+                label: None,
             })
         })
         .collect()
@@ -204,7 +209,7 @@ mod tests {
         .unwrap();
         let limits = parse_statusline(&input);
         assert_eq!(limits.len(), 2);
-        assert_eq!(limits[0], Limit { window_minutes: FIVE_HOURS, used_percent: 23.5, resets_at: Some(1000) });
+        assert_eq!(limits[0], Limit { window_minutes: FIVE_HOURS, used_percent: 23.5, resets_at: Some(1000), label: None });
         assert_eq!(limits[1].window_minutes, SEVEN_DAYS);
         let s = render_statusline(&input, &limits, 0, Locale::Ja);
         assert_eq!(s, "Opus · ctx 34% · 5h 残り 77%（16分後に回復） · 7d 残り 59%（1日1時間後に回復）");

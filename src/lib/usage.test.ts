@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { i18n } from './i18n.svelte';
-import { duration, level, remainingPercent, resetText, staleText, windowLabel } from './usage';
+import { duration, level, limitLabel, remainingPercent, resetText, staleText, windowLabel } from './usage';
 
 describe('usage', () => {
   beforeEach(() => {
     i18n.locale = 'ja';
+  });
+
+  it('グループ名つきの枠の名前', () => {
+    expect(limitLabel({ windowMinutes: 300, usedPercent: 0, resetsAt: null })).toBe('5時間');
+    expect(limitLabel({ windowMinutes: 10080, usedPercent: 0, resetsAt: null, label: 'Claude/GPT' })).toBe('Claude/GPT 1週間');
   });
 
   it('枠の名前', () => {

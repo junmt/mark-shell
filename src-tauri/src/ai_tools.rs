@@ -246,9 +246,93 @@ fn with_limits(mut r: UsageResult) -> UsageResult {
             r.limits = limits;
             r.limits_updated_at = at;
         }
+        "antigravity" => match antigravity_limits() {
+            Ok((limits, at)) => {
+                r.limits = limits;
+                r.limits_updated_at = Some(at);
+            }
+            Err(note) => r.limits_note = Some(note),
+        },
         _ => {}
     }
     r
+}
+
+/// `agy -p /usage` の結果を使い回す時間。agy の起動に数秒かかるので、Usage の更新ごとには呼ばない
+const AGY_USAGE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+type AgyUsageCache = Option<(std::time::Instant, Result<(Vec<crate::rate_limits::Limit>, u64), String>)>;
+
+/// Antigravity の残り（枠ごとの使用率と回復時刻）と、取得した時刻（UNIX 秒）。結果は 5 分間使い回す
+fn antigravity_limits() -> Result<(Vec<crate::rate_limits::Limit>, u64), String> {
+    static CACHE: std::sync::Mutex<AgyUsageCache> = std::sync::Mutex::new(None);
+    // 取得中はロックを持ったままにして、同時に何度も agy を起動しない
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, res)) = cache.as_ref() {
+        if at.elapsed() < AGY_USAGE_TTL {
+            return res.clone();
+        }
+    }
+    let res = fetch_antigravity_limits();
+    *cache = Some((std::time::Instant::now(), res.clone()));
+    res
+}
+
+/// Antigravity CLI のスラッシュコマンド /usage を印刷モード（`agy -p /usage`）で実行して残りを読む
+fn fetch_antigravity_limits() -> Result<(Vec<crate::rate_limits::Limit>, u64), String> {
+    let unavailable = || {
+        tr!(
+            "Antigravity CLI（agy）にログインすると、残りを表示します",
+            "Sign in to Antigravity CLI (agy) to show the remaining usage",
+            "登录 Antigravity CLI（agy）后，会显示剩余用量"
+        )
+    };
+    let (_, path) = find("antigravity").map_err(|_| unavailable())?;
+    let mut cmd = std::process::Command::new(path);
+    cmd.args(["-p", "/usage"]);
+    cmd.current_dir(dirs::home_dir().unwrap_or_else(std::env::temp_dir));
+    cmd.env("NO_COLOR", "1");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let (status, out, _) = run_command_timeout(cmd, std::time::Duration::from_secs(30))?;
+    let limits = parse_agy_usage(&strip_ansi(&String::from_utf8_lossy(&out)));
+    if !status.success() || limits.is_empty() {
+        return Err(unavailable());
+    }
+    Ok((limits, now_secs()))
+}
+
+/// `agy -p /usage` の出力（1 行 1 枠のタブ区切り: グループ、枠の名前、残り%、回復時刻）を読む。
+/// 例: `Gemini Models\tFive Hour Limit Remaining\t100%\t2026-11-18T07:50:28Z`
+fn parse_agy_usage(text: &str) -> Vec<crate::rate_limits::Limit> {
+    text.lines()
+        .filter_map(|line| {
+            let cols: Vec<&str> = line.split('\t').map(str::trim).collect();
+            let [group, name, pct, reset, ..] = cols.as_slice() else { return None };
+            let remaining: f64 = pct.strip_suffix('%')?.trim().parse().ok()?;
+            let lower = name.to_ascii_lowercase();
+            let window_minutes = if lower.contains("five hour") || lower.contains("5 hour") || lower.contains("5-hour") {
+                crate::rate_limits::FIVE_HOURS
+            } else if lower.contains("week") {
+                crate::rate_limits::SEVEN_DAYS
+            } else if lower.contains("daily") || lower.contains("day") {
+                1440
+            } else {
+                0
+            };
+            // 「Gemini Models」→「Gemini」、「Claude and GPT models」→「Claude/GPT」
+            let label = group.trim_end_matches(" Models").trim_end_matches(" models").replace(" and ", "/");
+            Some(crate::rate_limits::Limit {
+                window_minutes,
+                used_percent: (100.0 - remaining).max(0.0),
+                resets_at: parse_iso_secs(reset),
+                label: Some(label),
+            })
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -629,7 +713,7 @@ fn codex_limit(w: &serde_json::Value, ts: Option<u64>) -> Option<crate::rate_lim
         .get("resets_at")
         .and_then(|x| x.as_u64())
         .or_else(|| Some(ts? + w.get("resets_in_seconds").and_then(|x| x.as_u64())?));
-    Some(crate::rate_limits::Limit { window_minutes, used_percent: used, resets_at })
+    Some(crate::rate_limits::Limit { window_minutes, used_percent: used, resets_at, label: None })
 }
 
 /// Codex の ~/.codex/sessions から最新のレート制限（枠ごとの使用率とリセット時刻）、その時刻、トークン数を読み取る
@@ -684,6 +768,107 @@ fn codex_local_stats() -> (Vec<crate::rate_limits::Limit>, Option<u64>, u64, u64
     (latest.0, latest.1, today_tok, total_tok)
 }
 
+/// (フィールド番号, varint の値, 長さつきの中身)
+type PbField<'a> = (u64, Option<u64>, Option<&'a [u8]>);
+
+/// protobuf のバイト列を (フィールド番号, varint の値, 長さつきの中身) の並びとして読む。壊れていればそこで止める
+fn pb_fields(mut b: &[u8]) -> Vec<PbField<'_>> {
+    fn varint(b: &mut &[u8]) -> Option<u64> {
+        let mut x = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&c, rest) = b.split_first()?;
+            *b = rest;
+            x |= u64::from(c & 0x7f) << shift;
+            if c & 0x80 == 0 {
+                return Some(x);
+            }
+        }
+        None
+    }
+    let mut out = Vec::new();
+    while !b.is_empty() {
+        let Some(tag) = varint(&mut b) else { break };
+        let field = tag >> 3;
+        match tag & 7 {
+            0 => match varint(&mut b) {
+                Some(v) => out.push((field, Some(v), None)),
+                None => break,
+            },
+            1 | 5 => {
+                let n = if tag & 7 == 1 { 8 } else { 4 };
+                if b.len() < n {
+                    break;
+                }
+                b = &b[n..];
+            }
+            2 => {
+                let Some(len) = varint(&mut b).and_then(|l| usize::try_from(l).ok()) else { break };
+                if b.len() < len {
+                    break;
+                }
+                out.push((field, None, Some(&b[..len])));
+                b = &b[len..];
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+fn pb_msg(b: &[u8], field: u64) -> Option<&[u8]> {
+    pb_fields(b).into_iter().find(|(f, _, s)| *f == field && s.is_some()).and_then(|(_, _, s)| s)
+}
+
+fn pb_uint(b: &[u8], field: u64) -> Option<u64> {
+    pb_fields(b).into_iter().find(|(f, v, _)| *f == field && v.is_some()).and_then(|(_, v, _)| v)
+}
+
+/// Antigravity の 1 回の生成（gen_metadata の 1 行）から (トークン数, 時刻) を取り出す。
+/// 1.4 が使用量（2: 入力、3: 出力、4: キャッシュ作成、5: キャッシュ読み込み）、1.9.4.1 が開始時刻（UNIX 秒）
+fn antigravity_generation(data: &[u8]) -> Option<(u64, Option<u64>)> {
+    let meta = pb_msg(data, 1)?;
+    let usage = pb_msg(meta, 4)?;
+    let tok = (2..=5).filter_map(|f| pb_uint(usage, f)).fold(0u64, u64::saturating_add);
+    let ts = pb_msg(meta, 9).and_then(|m| pb_msg(m, 4)).and_then(|m| pb_uint(m, 1));
+    Some((tok, ts))
+}
+
+/// Antigravity（CLI・IDE）の会話 DB（~/.gemini/antigravity*/conversations/*.db）から (直近 24 時間, 合計) のトークン数を集計する
+fn antigravity_local_stats(now: u64) -> (u64, u64) {
+    use rusqlite::{Connection, OpenFlags};
+    let mut today = 0u64;
+    let mut total = 0u64;
+    let Some(home) = dirs::home_dir() else { return (0, 0) };
+    for dir in ["antigravity-cli", "antigravity"] {
+        let Ok(rd) = std::fs::read_dir(home.join(".gemini").join(dir).join("conversations")) else { continue };
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("db") {
+                continue;
+            }
+            let mtime = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            let Ok(conn) = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX) else {
+                continue;
+            };
+            let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+            let Ok(mut stmt) = conn.prepare("SELECT data FROM gen_metadata") else { continue };
+            let Ok(rows) = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0)) else { continue };
+            for data in rows.flatten() {
+                let Some((tok, ts)) = antigravity_generation(&data) else { continue };
+                total = total.saturating_add(tok);
+                if ts.or(mtime).is_some_and(|ts| now.saturating_sub(ts) < 86400) {
+                    today = today.saturating_add(tok);
+                }
+            }
+        }
+    }
+    (today, total)
+}
+
 /// 各 AI ツールがローカルに残すセッションログから Usage（トークン数・レート制限）を集計する
 fn collect_local_usage(tool_id: &str) -> (String, String) {
     let now = now_secs();
@@ -727,35 +912,7 @@ fn collect_local_usage(tool_id: &str) -> (String, String) {
             format_token_summary(today, total, None)
         }
         "antigravity" => {
-            let mut today = 0u64;
-            let mut total = 0u64;
-            if let Some(brain) = dirs::home_dir().map(|h| h.join(".gemini").join("antigravity-cli").join("brain")) {
-                if let Ok(rd) = std::fs::read_dir(brain) {
-                    for e in rd.flatten() {
-                        let log = e.path().join(".system_generated").join("logs").join("transcript.jsonl");
-                        let Ok(text) = std::fs::read_to_string(&log) else { continue };
-                        for line in text.lines() {
-                            if !line.contains("input_tokens") && !line.contains("output_tokens") {
-                                continue;
-                            }
-                            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-                            let tok = v.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
-                                + v.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0)
-                                + v.get("cache_read_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-                            total = total.saturating_add(tok);
-                            let is_today = v
-                                .get("created_at")
-                                .and_then(|x| x.as_str())
-                                .and_then(parse_iso_secs)
-                                .map(|ts| now.saturating_sub(ts) < 86400)
-                                .unwrap_or(false);
-                            if is_today {
-                                today = today.saturating_add(tok);
-                            }
-                        }
-                    }
-                }
-            }
+            let (today, total) = antigravity_local_stats(now);
             format_token_summary(today, total, None)
         }
         "codex-cli" => {
@@ -1113,5 +1270,63 @@ mod tests {
         assert!(short.contains("142.2K"));
         assert!(short.contains("$12.30"));
         assert!(detail.contains("2026-11-18"));
+    }
+
+    fn pb_varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn pb_u(field: u64, v: u64) -> Vec<u8> {
+        let mut o = Vec::new();
+        pb_varint(field << 3, &mut o);
+        pb_varint(v, &mut o);
+        o
+    }
+
+    fn pb_m(field: u64, body: &[u8]) -> Vec<u8> {
+        let mut o = Vec::new();
+        pb_varint((field << 3) | 2, &mut o);
+        pb_varint(body.len() as u64, &mut o);
+        o.extend_from_slice(body);
+        o
+    }
+
+    #[test]
+    fn antigravity_generation_tokens() {
+        // 実際の gen_metadata と同じ形（1.4 に使用量、1.9.4.1 に時刻、ほかのフィールドも混ざる）
+        let usage = [pb_u(1, 1020), pb_u(2, 1677), pb_u(3, 202), pb_u(5, 16264), pb_u(6, 24), pb_u(9, 126), pb_m(11, b"abc")].concat();
+        let time = pb_m(4, &[pb_u(1, 1_781_180_185), pb_u(2, 980_711_100)].concat());
+        let meta = [pb_u(3, 1020), pb_m(4, &usage), pb_m(7, &pb_m(1, b"auto")), pb_m(9, &time)].concat();
+        let data = [pb_m(2, b""), pb_m(1, &meta), pb_m(4, b"a3ae5d3f")].concat();
+        assert_eq!(antigravity_generation(&data), Some((1677 + 202 + 16264, Some(1_781_180_185))));
+        assert_eq!(antigravity_generation(b"\xff\xff"), None);
+    }
+
+    #[test]
+    fn agy_usage_output() {
+        let out = "Gemini Models\tWeekly Limit Remaining\t100%\t2026-11-25T02:50:28Z\n\
+                   Gemini Models\tFive Hour Limit Remaining\t75%\t2026-11-18T07:50:28Z\n\
+                   Claude and GPT models\tFive Hour Limit Remaining\t12%\t2026-11-18T07:50:28Z\n\
+                   Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t99%\t2026-11-25T02:49:38Z\n\
+                   \nsomething else\n";
+        let l = parse_agy_usage(out);
+        assert_eq!(l.len(), 4);
+        assert_eq!(l[0].window_minutes, crate::rate_limits::SEVEN_DAYS);
+        assert_eq!(l[0].label.as_deref(), Some("Gemini"));
+        assert_eq!(l[1].window_minutes, crate::rate_limits::FIVE_HOURS);
+        assert_eq!(l[1].used_percent, 25.0);
+        assert_eq!(l[1].resets_at, parse_iso_secs("2026-11-18T07:50:28Z"));
+        assert_eq!(l[2].label.as_deref(), Some("Claude/GPT"));
+        assert_eq!(l[2].used_percent, 88.0);
+        assert_eq!(l[3].label.as_deref(), Some("Gemini 4 Argon"));
+        assert_eq!(l[3].window_minutes, crate::rate_limits::SEVEN_DAYS);
     }
 }

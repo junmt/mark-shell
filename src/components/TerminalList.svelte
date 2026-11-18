@@ -4,7 +4,7 @@
   import { tr } from '../lib/i18n.svelte';
   import { keysOf } from '../lib/termLayout';
   import type { ToolInfo } from '../lib/api';
-  import { level, remainingPercent, resetText, staleText, windowLabel } from '../lib/usage';
+  import { level, limitLabel, remainingPercent, resetText, staleText } from '../lib/usage';
 
   // 左ペインの下側に並べるターミナルの一覧と、その下の各 AI の Usage 表示
 
@@ -41,7 +41,7 @@
     for (const l of state?.limits ?? []) {
       const rem = Math.round(remainingPercent(l, now));
       const reset = resetText(l, now);
-      lines.push(`${windowLabel(l.windowMinutes)}: ${tr(`残り ${rem}%`, `${rem}% left`, `剩余 ${rem}%`)}${reset ? ` — ${reset}` : ''}`);
+      lines.push(`${limitLabel(l)}: ${tr(`残り ${rem}%`, `${rem}% left`, `剩余 ${rem}%`)}${reset ? ` — ${reset}` : ''}`);
     }
     lines.push(`${tr('コマンド', 'Command', '命令')}: ${cmd}`);
     if (state?.error) lines.push(state.error);
@@ -219,16 +219,16 @@
           </div>
           {#if state?.limits.length}
             <div class="limits">
-              {#each state.limits as l (l.windowMinutes)}
+              {#each state.limits as l, i (i)}
                 {@const rem = remainingPercent(l, now)}
-                <span class="limit-name">{windowLabel(l.windowMinutes)}</span>
+                <span class="limit-name">{limitLabel(l)}</span>
                 <span
                   class="bar"
                   role="meter"
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(rem)}
-                  aria-label={windowLabel(l.windowMinutes)}
+                  aria-label={limitLabel(l)}
                 >
                   <span class="fill {level(rem)}" style:width="{rem}%"></span>
                 </span>

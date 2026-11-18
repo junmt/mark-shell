@@ -2,7 +2,7 @@
 import { i18n, tr } from './i18n.svelte';
 
 /** レート制限の 1 枠（Rust の rate_limits::Limit） */
-export type UsageLimit = { windowMinutes: number; usedPercent: number; resetsAt: number | null };
+export type UsageLimit = { windowMinutes: number; usedPercent: number; resetsAt: number | null; label?: string | null };
 
 /** 枠の名前（5時間、1週間 など） */
 export function windowLabel(minutes: number): string {
@@ -17,6 +17,11 @@ export function windowLabel(minutes: number): string {
     return tr(`${h}時間`, `${h}-hour`, `${h}小时`);
   }
   return minutes > 0 ? tr(`${minutes}分`, `${minutes}-min`, `${minutes}分钟`) : tr('上限', 'Limit', '上限');
+}
+
+/** 枠の表示名。同じ長さの枠が複数あるツール（Antigravity）はグループ名を前に付ける */
+export function limitLabel(l: UsageLimit): string {
+  return l.label ? `${l.label} ${windowLabel(l.windowMinutes)}` : windowLabel(l.windowMinutes);
 }
 
 /** 残りの割合（0〜100）。リセット時刻を過ぎていれば 100 */

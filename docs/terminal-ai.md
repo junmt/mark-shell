@@ -126,9 +126,11 @@
 - `kind: "cli"` はターミナルのタブで実行し、`kind: "ide"`（`detached: true`）は別ウィンドウのアプリとして起動する。
 - 引数はシェルの文字列連結ではなく引数配列として渡し、ファイル名などによるコマンドインジェクションを防ぐ。
 - 各ツールにはプリセットの `usageCommand`（設定画面でも変更可）があり、左ペインのターミナル一覧の下に各 AI の Usage を表示する。一定間隔（既定 30 秒、設定画面で変更可、0 で自動更新オフ）でコマンドを実行して値を更新する。
+  - Antigravity（`mark-shell --ai-usage antigravity`）: 会話ごとの SQLite（`~/.gemini/antigravity-cli/conversations/*.db`、IDE 版は `~/.gemini/antigravity/conversations/*.db`）の `gen_metadata` を読み取り専用で開き、生成ごとのトークン数（入力・出力・キャッシュ）を集計する。transcript.jsonl にはトークン数が残らないため使わない。
 - あとどれくらい使えるか（レート制限の枠ごとの残りと回復時刻）は、Usage の下にバーで表示する。残り 50% 以下で黄、20% 以下で赤。10 分より前に記録した値には「◯分前の値」と添える。
   - Claude Code: §3.4 のフック定義ファイルに、ステータスラインとして `mark-shell.exe --statusline` も登録する。Claude Code がステータスラインに渡す `rate_limits`（5 時間・1 週間の使用率とリセット時刻。claude.ai の Pro / Max などで使っているときだけ）を `%LOCALAPPDATA%\mark-shell\claude-rate-limits.json` に記録し、ステータスラインにも「5h 残り 97%（4時間1分後に回復）」のように出す。値は mark-shell のターミナルで Claude Code を使ったときに更新される。ユーザーが自分の `~/.claude/settings.json` でステータスラインを設定しているときは、上書きしないよう登録しない（残りは表示されない）。
   - Codex: セッションログ（`~/.codex/sessions`）の `rate_limits` を読む。
+  - Antigravity: Antigravity CLI のスラッシュコマンド `/usage` を印刷モード（`agy -p /usage`）で実行し、タブ区切りの出力（グループ、枠、残り%、回復時刻）を読む。グループ（Gemini、Claude/GPT など）ごとに枠があるので、枠の名前の前にグループ名を付ける。agy の起動に数秒かかるため、結果は 5 分間使い回す。agy が見つからない・ログインしていないときは使用量だけを表示する。
   - そのほかのツールは残りを取得できないので、使用量だけを表示する。
 
 ### 3.3 エディタからの呼び出し
