@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absToRel, encodeLinkTarget, isInside, normalize, rebase, relative, stem } from './paths';
+import { absToRel, encodeLinkTarget, isImage, isInside, isPdf, normalize, rebase, relative, stem } from './paths';
 import { buildTree, flatten } from './tree';
 
 describe('paths', () => {
@@ -32,6 +32,14 @@ describe('paths', () => {
   it('stem / encode', () => {
     expect(stem('a/設計メモ.md')).toBe('設計メモ');
     expect(encodeLinkTarget('my notes/a (1).md')).toBe('my%20notes/a%20%281%29.md');
+  });
+
+  it('isImage / isPdf', () => {
+    expect(isImage('a/pic.PNG')).toBe(true);
+    expect(isImage('a/doc.pdf')).toBe(false);
+    expect(isPdf('a/doc.pdf')).toBe(true);
+    expect(isPdf('a/SPEC.PDF')).toBe(true);
+    expect(isPdf('a/readme.md')).toBe(false);
   });
 });
 

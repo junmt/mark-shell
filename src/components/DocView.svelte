@@ -6,8 +6,10 @@
   import Preview from './Preview.svelte';
   import ImagePreview from './ImagePreview.svelte';
   import HtmlPreview from './HtmlPreview.svelte';
+  import PdfPreview from './PdfPreview.svelte';
   import Icon from './Icon.svelte';
   import { stepZoom, type ImageBg } from '../lib/image';
+  import { parsePageInput, stepPdfZoom } from '../lib/pdf';
   import { tr } from '../lib/i18n.svelte';
 
   let { doc: docProp }: { doc: Doc } = $props();
@@ -23,11 +25,13 @@
   ]);
 
   const isRasterImage = doc.kind === 'image';
+  const isPdf = doc.kind === 'pdf';
+  const isBinaryPreview = isRasterImage || isPdf;
   const isSvg = $derived(doc.kind === 'text' && store.isSvg(doc.path));
   const isHtml = $derived(doc.kind === 'text' && store.isHtml(doc.path));
-  const hasPreview = $derived(!isRasterImage && store.hasPreview(doc.path));
-  // Markdown・SVG・HTML はモードを切り替えられる。その他のテキストは編集だけ、ラスター画像はプレビューだけ
-  const mode = $derived<Mode>(isRasterImage ? 'preview' : hasPreview ? doc.mode : 'edit');
+  const hasPreview = $derived(!isBinaryPreview && store.hasPreview(doc.path));
+  // Markdown・SVG・HTML はモードを切り替えられる。その他のテキストは編集だけ、ラスター画像・PDF はプレビューだけ
+  const mode = $derived<Mode>(isBinaryPreview ? 'preview' : hasPreview ? doc.mode : 'edit');
   const showImageTools = $derived(isRasterImage || (isSvg && mode !== 'edit'));
   const showHtmlTools = $derived(isHtml && mode !== 'edit');
 
@@ -38,12 +42,40 @@
   let imageBg = $state<ImageBg>('checker');
   let htmlReloadSeq = $state(0);
 
+  let pdfZoom = $state<number | null>(null);
+  let pdfRotation = $state(0);
+  let pdfPage = $state(1);
+  let pdfPages = $state(0);
+  let pdfJumpToPage = $state<((page: number) => void) | null>(null);
+  let pdfPageInput = $state('1');
+
+  $effect(() => {
+    pdfPageInput = String(pdfPage);
+  });
+
   const effectiveZoom = $derived(imageZoom ?? doc.imageMeta?.fitScale ?? 1);
   const zoomLabel = $derived(
     imageZoom === null
       ? tr('全体', 'Fit', '适合')
       : `${Math.round(imageZoom * 100)}%`,
   );
+
+  const effectivePdfZoom = $derived(pdfZoom ?? doc.pdfMeta?.fitScale ?? 1);
+  const pdfZoomLabel = $derived(
+    pdfZoom === null
+      ? tr('幅', 'Fit', '适宽')
+      : `${Math.round(pdfZoom * 100)}%`,
+  );
+
+  function commitPdfPage() {
+    if (pdfPages <= 0) return;
+    const parsed = parsePageInput(pdfPageInput, pdfPages);
+    if (parsed !== null) {
+      pdfJumpToPage?.(parsed);
+    } else {
+      pdfPageInput = String(pdfPage);
+    }
+  }
 
   function setMode(m: Mode) {
     doc.mode = m;
@@ -170,11 +202,88 @@
           <span>{tr('ブラウザで開く', 'Open in browser', '在浏览器中打开')}</span>
         </button>
       </div>
+    {:else if isPdf}
+      <div class="img-tools">
+        {#if pdfPages > 0}
+          <button
+            class="icon-btn"
+            title={tr('前のページ (PageUp)', 'Previous page (PageUp)', '上一页 (PageUp)')}
+            disabled={pdfPage <= 1}
+            onclick={() => pdfJumpToPage?.(pdfPage - 1)}
+          >
+            <Icon name="chevronLeft" size={14} />
+          </button>
+          <form
+            class="page-nav"
+            onsubmit={(e) => {
+              e.preventDefault();
+              commitPdfPage();
+            }}
+          >
+            <input
+              class="page-input"
+              type="text"
+              inputmode="numeric"
+              aria-label={tr('ページ番号', 'Page number', '页码')}
+              bind:value={pdfPageInput}
+              onblur={commitPdfPage}
+            />
+            <span class="page-total">/ {pdfPages}</span>
+          </form>
+          <button
+            class="icon-btn"
+            title={tr('次のページ (PageDown)', 'Next page (PageDown)', '下一页 (PageDown)')}
+            disabled={pdfPage >= pdfPages}
+            onclick={() => pdfJumpToPage?.(pdfPage + 1)}
+          >
+            <Icon name="chevronRight" size={14} />
+          </button>
+          <span class="tool-sep"></span>
+          <button
+            class="icon-btn"
+            title={tr('縮小 (-)', 'Zoom out (-)', '缩小 (-)')}
+            onclick={() => (pdfZoom = stepPdfZoom(effectivePdfZoom, -1))}
+          >
+            <Icon name="zoomOut" size={14} />
+          </button>
+          <button
+            class="tool-btn"
+            title={tr('幅に合わせる / 100% を切り替え', 'Toggle Fit width / 100%', '切换适合宽度 / 100%')}
+            onclick={() => (pdfZoom = pdfZoom === null ? 1 : null)}
+          >
+            {pdfZoomLabel}
+          </button>
+          <button
+            class="icon-btn"
+            title={tr('拡大 (+)', 'Zoom in (+)', '放大 (+)')}
+            onclick={() => (pdfZoom = stepPdfZoom(effectivePdfZoom, 1))}
+          >
+            <Icon name="zoomIn" size={14} />
+          </button>
+          <span class="tool-sep"></span>
+          <button
+            class="icon-btn"
+            title={tr('右に 90° 回転 (R)', 'Rotate 90° clockwise (R)', '顺时针旋转 90° (R)')}
+            onclick={() => (pdfRotation = (pdfRotation + 90) % 360)}
+          >
+            <Icon name="rotateCw" size={14} />
+          </button>
+          <span class="tool-sep"></span>
+        {/if}
+        <button
+          class="icon-btn"
+          title={tr('既定のアプリで開く', 'Open in default app', '用默认应用打开')}
+          disabled={doc.deleted}
+          onclick={() => void api.openWithDefaultApp(doc.path).catch((err) => store.toast(errorMessage(err), 'error'))}
+        >
+          <Icon name="externalLink" size={14} />
+        </button>
+      </div>
     {/if}
   </div>
 
   {#if doc.deleted}
-    {#if isRasterImage}
+    {#if isBinaryPreview}
       <div class="banner warn">
         {tr('このファイルは削除されました。', 'This file was deleted.', '此文件已被删除。')}
         <button class="btn" onclick={() => void store.closeTab(doc.path)}>{tr('タブを閉じる', 'Close tab', '关闭标签页')}</button>
@@ -197,6 +306,15 @@
   <div class="body" bind:this={body}>
     {#if isRasterImage}
       <ImagePreview {doc} bind:zoom={imageZoom} bind:bg={imageBg} />
+    {:else if isPdf}
+      <PdfPreview
+        {doc}
+        bind:zoom={pdfZoom}
+        bind:rotation={pdfRotation}
+        bind:currentPage={pdfPage}
+        bind:numPages={pdfPages}
+        bind:jumpToPage={pdfJumpToPage}
+      />
     {:else}
       {#if mode !== 'preview'}
         <div class="pane" style:flex={mode === 'split' ? `0 0 ${splitWidth * 100}%` : '1'}>
@@ -317,6 +435,25 @@
     height: 14px;
     background: var(--border);
     margin: 0 4px;
+  }
+
+  .page-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+
+  .page-input {
+    width: 40px;
+    padding: 1px 4px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .page-total {
+    white-space: nowrap;
   }
 
   .bg-swatch {

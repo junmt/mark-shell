@@ -179,6 +179,8 @@ pub struct ReadResult {
 
 /// エディタで開けるファイルの大きさの上限。大きなログでも画面が固まらない程度にする
 const MAX_OPEN_BYTES: u64 = 50 * 1024 * 1024;
+/// PDF プレビューで読み込むファイルの上限
+const MAX_PDF_BYTES: u64 = 100 * 1024 * 1024;
 /// エディタで開けないファイル（バイナリ・大きすぎる）のエラーに付ける印（画面側の api.ts と同じ）
 const NOT_TEXT_PREFIX: &str = "not-text:";
 
@@ -262,6 +264,31 @@ pub async fn read_image_data_url(app: AppHandle, path: String) -> Result<String,
         let bytes = fs::read(&p).map_err(|e| tr!("{path} を読めません: {e}", "Cannot read {path}: {e}", "无法读取 {path}：{e}"))?;
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Ok(format!("data:{ct};base64,{b64}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// ワークスペース内の PDF ファイルをバイナリとして返す（PDF プレビュー用）
+#[tauri::command]
+pub async fn read_pdf(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
+    let root = app.state::<AppState>().root()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = resolve(&root, &path)?;
+        let meta = fs::metadata(&p).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))?;
+        if !meta.is_file() {
+            return Err(tr!("{path} はファイルではありません", "{path} is not a file", "{path} 不是文件"));
+        }
+        if meta.len() > MAX_PDF_BYTES {
+            let (size, max) = (meta.len() / 1024 / 1024, MAX_PDF_BYTES / 1024 / 1024);
+            return Err(tr!(
+                "{path} は大きすぎるためプレビューできません（{size} MB。上限は {max} MB）",
+                "{path} is too large to preview ({size} MB; limit is {max} MB)",
+                "{path} 太大，无法预览（{size} MB，上限为 {max} MB）"
+            ));
+        }
+        let bytes = fs::read(&p).map_err(|e| tr!("{path} を読めません: {e}", "Cannot read {path}: {e}", "无法读取 {path}：{e}"))?;
+        Ok(tauri::ipc::Response::new(bytes))
     })
     .await
     .map_err(|e| e.to_string())?

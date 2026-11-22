@@ -116,6 +116,7 @@ pub fn run() {
             workspace::read_file,
             workspace::image_info,
             workspace::read_image_data_url,
+            workspace::read_pdf,
             workspace::write_file,
             clipboard::copy_image_file,
             clipboard::copy_image_png,

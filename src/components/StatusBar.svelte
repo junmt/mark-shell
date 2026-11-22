@@ -6,7 +6,8 @@
 
   const doc = $derived(store.activeDoc);
   const isImageDoc = $derived(doc?.kind === 'image');
-  const chars = $derived(doc && !isImageDoc ? [...doc.text.replace(/\s/g, '')].length : 0);
+  const isPdfDoc = $derived(doc?.kind === 'pdf');
+  const chars = $derived(doc && doc.kind === 'text' ? [...doc.text.replace(/\s/g, '')].length : 0);
   const encodingLabel = (e: string) =>
     ({ 'utf-8': 'UTF-8', 'utf-8-bom': 'UTF-8 (BOM)', 'utf-16le': 'UTF-16 LE', 'utf-16be': 'UTF-16 BE' })[e] ?? e;
 </script>
@@ -49,6 +50,18 @@
       {/if}
       <span>{formatBytes(doc.fileSize)}</span>
       <span>{imageFormatLabel(doc.path)}</span>
+      {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
+    {:else if isPdfDoc}
+      {#if doc.pdfMeta}
+        <span>{tr(`ページ ${doc.pdfMeta.page} / ${doc.pdfMeta.pages}`, `Page ${doc.pdfMeta.page} / ${doc.pdfMeta.pages}`, `第 ${doc.pdfMeta.page} / ${doc.pdfMeta.pages} 页`)}</span>
+        <span>
+          {doc.pdfMeta.zoom === null
+            ? `${Math.round(doc.pdfMeta.fitScale * 100)}% (${tr('幅', 'Fit', '适宽')})`
+            : `${Math.round(doc.pdfMeta.zoom * 100)}%`}
+        </span>
+      {/if}
+      <span>{formatBytes(doc.fileSize)}</span>
+      <span>PDF</span>
       {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
     {:else}
       <span

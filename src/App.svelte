@@ -35,8 +35,8 @@
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !(isMac && e.metaKey)) return;
       const el = e.target instanceof Element ? e.target : null;
-      // 画像プレビュー上では ImagePreview 側でズーム倍率を変える
-      if (el?.closest('.image-preview')) return;
+      // 画像・PDF プレビュー上では各プレビュー側でズーム倍率を変える
+      if (el?.closest('.image-preview, .pdf-preview')) return;
       e.preventDefault();
       const target = el?.closest('.term')
         ? 'terminal'

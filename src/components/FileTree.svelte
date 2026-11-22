@@ -2,16 +2,17 @@
   import { store, type MenuItem } from '../lib/store.svelte';
   import { api, errorMessage } from '../lib/api';
   import { isMac, tr } from '../lib/i18n.svelte';
-  import { basename, dirname, isImage, isInside, join } from '../lib/paths';
+  import { basename, dirname, isImage, isInside, isPdf, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
   import Icon, { type IconName } from './Icon.svelte';
   import { git } from '../lib/git.svelte';
 
-  /** フォルダ（開閉）・Markdown・画像・その他で描き分ける */
+  /** フォルダ（開閉）・Markdown・画像・PDF・その他で描き分ける */
   function iconFor(node: TreeNode): IconName {
     if (node.dir) return store.expanded.has(node.path) ? 'folderOpen' : 'folder';
     if (store.isMarkdown(node.path)) return 'fileText';
     if (isImage(node.path)) return 'image';
+    if (isPdf(node.path)) return 'filePdf';
     return 'file';
   }
 
@@ -67,7 +68,7 @@
       }
       if (!node.dir) {
         items.push({ label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'), action: () => void store.openFile(node.path, { pin: true }) });
-        if (isImage(node.path)) {
+        if (isImage(node.path) || isPdf(node.path)) {
           items.push({
             label: tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
             action: () => void api.openWithDefaultApp(node.path).catch((err) => store.toast(errorMessage(err), 'error')),

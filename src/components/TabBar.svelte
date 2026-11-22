@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store, type Doc } from '../lib/store.svelte';
   import { api, errorMessage } from '../lib/api';
-  import { basename, dirname, isImage } from '../lib/paths';
+  import { basename, dirname, isImage, isPdf } from '../lib/paths';
   import { tr } from '../lib/i18n.svelte';
   import { git, type GitTab } from '../lib/git.svelte';
 
@@ -62,7 +62,14 @@
               action: () => void api.openWithDefaultApp(doc.path).catch((err) => store.toast(errorMessage(err), 'error')),
             },
           ]
-        : []),
+        : isPdf(doc.path)
+          ? [
+              {
+                label: tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+                action: () => void api.openWithDefaultApp(doc.path).catch((err) => store.toast(errorMessage(err), 'error')),
+              },
+            ]
+          : []),
       ...gitItems(doc),
     ]);
   }

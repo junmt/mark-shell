@@ -30,11 +30,12 @@ import {
 } from './api';
 import { copyImgElementToClipboard, copyLocalImageToClipboard, copySvgTextToClipboard, svgToDataUrl } from './image';
 import { prepareHtmlPreview } from './htmlPreview';
+import { MAX_PRINT_PAGES, renderPdfPagesForPrint } from './pdf';
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { resolveTheme } from './themes';
 import { VSCODE_SETTINGS, projectColorsFromText, type ProjectColors } from './vscodeColors';
 import { i18n, isMac, resolveLocale, tr } from './i18n.svelte';
-import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, join, normalize, rebase, relative } from './paths';
+import { absToRel, basename, dirname, encodeLinkTarget, extname, isImage, isInside, isPdf, join, normalize, rebase, relative } from './paths';
 import { buildTree, flatten, type TreeNode } from './tree';
 import { contains, keysOf, leaf, remove, setRatio, splitAt, type SplitDir, type TermLayout } from './termLayout';
 import { git, type GitTab } from './git.svelte';
@@ -52,7 +53,7 @@ export type Mode = 'edit' | 'preview' | 'split';
 export type LeftView = 'files' | 'search' | 'outline' | 'git';
 
 export class Doc {
-  kind: 'text' | 'image' = 'text';
+  kind: 'text' | 'image' | 'pdf' = 'text';
   path = $state('');
   /** 編集中の本文 */
   text = $state('');
@@ -62,12 +63,14 @@ export class Doc {
   pinned = $state(false);
   mode = $state<Mode>('edit');
   deleted = $state(false);
-  /** 画像ファイルのバイト数（ステータスバー表示用） */
+  /** 画像・PDF ファイルのバイト数（ステータスバー表示用） */
   fileSize = $state(0);
-  /** 外部で更新された画像を読み込み直すための世代番号 */
+  /** 外部で更新された画像・PDF を読み込み直すための世代番号 */
   imageVersion = $state(0);
   /** 表示中の画像の解像度とズーム状態（ステータスバー表示用） */
   imageMeta = $state<{ width: number; height: number; zoom: number | null; fitScale: number } | null>(null);
+  /** 表示中の PDF のページ数・ズーム状態（ステータスバー表示用） */
+  pdfMeta = $state<{ page: number; pages: number; zoom: number | null; fitScale: number; rotation: number } | null>(null);
   /** 手動で選んだ色付けの言語（null なら拡張子などから自動）。Markdown 以外のファイルだけ */
   language = $state<string | null>(null);
   /** 実際に使っている言語の名前（色付けなしなら null） */
@@ -98,6 +101,14 @@ export class Doc {
   static image(path: string, info: ImageInfo): Doc {
     const doc = new Doc(path, { content: '', encoding: 'utf-8', eol: 'lf', readonly: info.readonly, mtime: info.mtime });
     doc.kind = 'image';
+    doc.mode = 'preview';
+    doc.fileSize = info.size;
+    return doc;
+  }
+
+  static pdf(path: string, info: ImageInfo): Doc {
+    const doc = new Doc(path, { content: '', encoding: 'utf-8', eol: 'lf', readonly: info.readonly, mtime: info.mtime });
+    doc.kind = 'pdf';
     doc.mode = 'preview';
     doc.fileSize = info.size;
     return doc;
@@ -304,6 +315,11 @@ class Store {
   /** ラスター画像ファイルか（画像プレビュー専用で開く） */
   isImageFile(path: string): boolean {
     return isImage(path) && !this.isSvg(path);
+  }
+
+  /** PDF ファイルか（PDF プレビュー専用で開く） */
+  isPdfFile(path: string): boolean {
+    return isPdf(path);
   }
 
   /** 編集 / 分割 / プレビューを切り替えられるファイルか */
@@ -801,7 +817,7 @@ class Store {
 
   /** 開いているファイルが外で変わったかを確かめて取り込む */
   private async checkExternal(doc: Doc) {
-    if (doc.kind === 'image') {
+    if (doc.kind === 'image' || doc.kind === 'pdf') {
       try {
         const info = await api.imageInfo(doc.path);
         doc.deleted = false;
@@ -921,6 +937,15 @@ class Store {
       try {
         const info = await api.imageInfo(path);
         doc = Doc.image(path, info);
+      } catch (e) {
+        if (!opts.quiet) this.toast(errorMessage(e), 'error');
+        return;
+      }
+      doc.pinned = !!opts.pin;
+    } else if (this.isPdfFile(path)) {
+      try {
+        const info = await api.imageInfo(path);
+        doc = Doc.pdf(path, info);
       } catch (e) {
         if (!opts.quiet) this.toast(errorMessage(e), 'error');
         return;
@@ -1772,7 +1797,8 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
       this.selected = target;
       return;
     }
-    if (!entry && !isImage(target)) {
+    const isBinaryPreview = isImage(target) || isPdf(target);
+    if (!entry && !isBinaryPreview) {
       const create = await this.confirm(
         tr('リンク先がありません', 'Link target not found', '链接目标不存在'),
         tr(`${target} はありません。作りますか？`, `${target} doesn't exist. Create it?`, `${target} 不存在。要创建吗？`),
@@ -1787,7 +1813,7 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
         this.toast(errorMessage(e), 'error');
         return;
       }
-    } else if (isImage(target)) {
+    } else if (isBinaryPreview) {
       const exists = !!entry || (await api.pathExists(target).catch(() => false));
       if (!exists) {
         this.toast(tr(`${target} が見つかりません`, `${target} was not found`, `找不到 ${target}`), 'error');
@@ -1942,6 +1968,24 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
     if (doc.kind === 'image') {
       const src = `${mdimgUrl(doc.path)}?v=${doc.imageVersion}`;
       this.printHtml = `<div style="text-align:center"><img src="${escapeHtml(src)}" alt="${escapeHtml(basename(doc.path))}" style="max-width:100%;max-height:95vh;object-fit:contain" /></div>`;
+    } else if (doc.kind === 'pdf') {
+      try {
+        const bytes = await api.readPdf(doc.path);
+        const res = await renderPdfPagesForPrint(bytes);
+        if (res.truncated) {
+          this.toast(
+            tr(
+              `ページ数が多いため先頭 ${MAX_PRINT_PAGES} ページまでを印刷します（全 ${res.total} ページは既定のアプリから印刷できます）`,
+              `Printing the first ${MAX_PRINT_PAGES} of ${res.total} pages (open in the default app to print all pages)`,
+              `页数较多，仅打印前 ${MAX_PRINT_PAGES} 页（共 ${res.total} 页，可用默认应用打印全部页面）`,
+            ),
+          );
+        }
+        this.printHtml = res.html;
+      } catch (e) {
+        this.toast(errorMessage(e), 'error');
+        return;
+      }
     } else if (this.isSvg(doc.path) && doc.mode !== 'edit') {
       const src = svgToDataUrl(doc.text);
       this.printHtml = `<div style="text-align:center"><img src="${escapeHtml(src)}" alt="${escapeHtml(basename(doc.path))}" style="max-width:100%;max-height:95vh;object-fit:contain" /></div>`;

@@ -96,6 +96,7 @@ export const api = {
   readFile: (path: string) => invoke<ReadResult>('read_file', { path }),
   imageInfo: (path: string) => invoke<ImageInfo>('image_info', { path }),
   readImageDataUrl: (path: string) => invoke<string>('read_image_data_url', { path }),
+  readPdf: (path: string) => invoke<ArrayBuffer>('read_pdf', { path }),
   copyImageFile: (path: string) => invoke<void>('copy_image_file', { path }),
   copyImagePng: (data: string) => invoke<void>('copy_image_png', { data }),
   writeFile: (path: string, content: string, encoding: string, eol: string) =>

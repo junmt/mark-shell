@@ -68,6 +68,10 @@ export function isImage(p: string): boolean {
   return IMAGE_EXT.has(extname(p));
 }
 
+export function isPdf(p: string): boolean {
+  return extname(p) === 'pdf';
+}
+
 /** Windows の絶対パスを相対パスに（ルートの外なら null） */
 export function absToRel(root: string, abs: string): string | null {
   const r = root.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
