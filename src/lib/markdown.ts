@@ -105,8 +105,14 @@ const BLOCK_TAGS = new Set([
   'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'pre', 'blockquote', 'table', 'tr', 'hr', 'div', 'details', 'img',
 ]);
 
+/** Tauri のカスタムプロトコルの URL は、Windows だけ http://<scheme>.localhost/ で、macOS・Linux は <scheme>://localhost/ */
+export const MDIMG_BASE =
+  typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+    ? 'http://mdimg.localhost/'
+    : 'mdimg://localhost/';
+
 export function mdimgUrl(rel: string): string {
-  return 'http://mdimg.localhost/' + rel.split('/').map(encodeURIComponent).join('/');
+  return MDIMG_BASE + rel.split('/').map(encodeURIComponent).join('/');
 }
 
 function safeDecode(s: string): string {
@@ -237,6 +243,9 @@ const PURIFY_CONFIG = {
   ADD_ATTR: ['data-line', 'data-mermaid', 'data-src', 'data-wiki', 'data-href', 'data-external', 'data-anchor', 'target'],
   FORBID_TAGS: ['style', 'iframe', 'form', 'object', 'embed', 'button', 'textarea', 'select', 'link', 'meta', 'base'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'formaction'],
+  // DOMPurify の既定に、macOS・Linux の画像 URL（mdimg://localhost/）用の mdimg を足したもの
+  ALLOWED_URI_REGEXP:
+    /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|mdimg):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 };
 
 export function renderMarkdown(text: string, context: RenderContext): string {

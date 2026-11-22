@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { headings, renderMarkdown, resolveLocal } from './markdown';
+import { headings, MDIMG_BASE, renderMarkdown, resolveLocal } from './markdown';
 
 const ctx = { root: 'C:\\Notes', notePath: 'notes/today.md', externalImages: 'click' as const };
 const render = (md: string) => {
@@ -61,7 +61,7 @@ describe('renderMarkdown', () => {
   it('画像: 相対パスは mdimg、外部はクリックで読み込み、ルートの外は表示しない', () => {
     const d = render('![](assets/a%20b.png) ![](https://example.com/x.png) ![](../../outside.png)');
     const imgs = d.querySelectorAll<HTMLImageElement>('img');
-    expect(imgs[0].getAttribute('src')).toBe('http://mdimg.localhost/notes/assets/a%20b.png');
+    expect(imgs[0].getAttribute('src')).toBe(MDIMG_BASE + 'notes/assets/a%20b.png');
     expect(imgs[1].getAttribute('src')).toBeNull();
     expect(imgs[1].dataset.src).toBe('https://example.com/x.png');
     expect(imgs[2].getAttribute('src')).toBeNull();
