@@ -9,7 +9,7 @@ use tauri::{Manager, Runtime, UriSchemeContext};
 use crate::paths::resolve;
 use crate::state::AppState;
 
-fn mime(ext: &str) -> Option<&'static str> {
+pub fn mime(ext: &str) -> Option<&'static str> {
     Some(match ext.to_ascii_lowercase().as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -28,6 +28,7 @@ fn respond(status: StatusCode, content_type: &str, body: Vec<u8>) -> Response<Co
         .status(status)
         .header("Content-Type", content_type)
         .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store")
         .body(Cow::Owned(body))
         .unwrap()
 }

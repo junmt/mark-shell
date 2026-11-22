@@ -184,6 +184,7 @@ function rehypeMarkShell() {
             p.title = tr('フォルダの外の画像は表示しません', 'Images outside the folder are not shown', '不显示文件夹以外的图片');
           } else {
             p.src = mdimgUrl(rel);
+            p.dataLocalPath = rel;
           }
         }
       }
@@ -240,7 +241,7 @@ function frontmatterHtml(yaml: string): string {
 }
 
 const PURIFY_CONFIG = {
-  ADD_ATTR: ['data-line', 'data-mermaid', 'data-src', 'data-wiki', 'data-href', 'data-external', 'data-anchor', 'target'],
+  ADD_ATTR: ['data-line', 'data-mermaid', 'data-src', 'data-local-path', 'data-wiki', 'data-href', 'data-external', 'data-anchor', 'target'],
   FORBID_TAGS: ['style', 'iframe', 'form', 'object', 'embed', 'button', 'textarea', 'select', 'link', 'meta', 'base'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'formaction'],
   // DOMPurify の既定に、macOS・Linux の画像 URL（mdimg://localhost/）用の mdimg を足したもの

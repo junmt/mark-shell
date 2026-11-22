@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
-  import { store, type Doc } from '../lib/store.svelte';
+  import { store, type Doc, type MenuItem } from '../lib/store.svelte';
+  import { api, errorMessage } from '../lib/api';
+  import { isMac, tr } from '../lib/i18n.svelte';
   import { renderMarkdown } from '../lib/markdown';
   import { enhance } from '../lib/enhance';
   import { toggleTaskLine } from '../lib/editor';
@@ -140,11 +142,78 @@
       await store.openExternal(d.external);
     }
   }
+
+  function onContextMenu(e: MouseEvent) {
+    const t = e.target as HTMLElement;
+    const img = t.closest<HTMLImageElement>('img');
+    if (!img || img.classList.contains('blocked-image')) return;
+
+    const items: MenuItem[] = [];
+    const localPath = img.dataset.localPath;
+    const externalUrl = img.dataset.src || (/^https?:\/\//i.test(img.src) ? img.src : null);
+
+    if (img.classList.contains('external-image') && img.dataset.src) {
+      const url = img.dataset.src;
+      items.push(
+        {
+          label: tr('画像を読み込む', 'Load image', '加载图片'),
+          action: () => {
+            img.src = url;
+            img.classList.remove('external-image');
+          },
+        },
+        { label: '', separator: true },
+        {
+          label: tr('画像 URL をコピー', 'Copy image URL', '复制图片地址'),
+          action: () => void navigator.clipboard.writeText(url).then(() => store.toast(tr(`コピーしました: ${url}`, `Copied: ${url}`, `已复制：${url}`))),
+        },
+        { label: tr('ブラウザで開く', 'Open in browser', '在浏览器中打开'), action: () => void store.openExternal(url) },
+      );
+      store.openMenu(e, items);
+      return;
+    }
+
+    items.push({
+      label: tr('画像をコピー', 'Copy image', '复制图片'),
+      action: () => void store.copyImage({ img }),
+    });
+
+    if (localPath) {
+      items.push(
+        {
+          label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'),
+          action: () => void store.openFile(localPath, { pin: true }),
+        },
+        { label: '', separator: true },
+        { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(localPath, false) },
+        { label: tr('相対パスをコピー', 'Copy relative path', '复制相对路径'), action: () => void store.copyPath(localPath, true) },
+        {
+          label: tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+          action: () => void api.openWithDefaultApp(localPath).catch((err) => store.toast(errorMessage(err), 'error')),
+        },
+        {
+          label: isMac ? tr('Finder で表示', 'Reveal in Finder', '在访达中显示') : tr('エクスプローラーで表示', 'Reveal in Explorer', '在资源管理器中显示'),
+          action: () => void api.revealInExplorer(localPath).catch((err) => store.toast(errorMessage(err), 'error')),
+        },
+      );
+    } else if (externalUrl) {
+      items.push(
+        { label: '', separator: true },
+        {
+          label: tr('画像 URL をコピー', 'Copy image URL', '复制图片地址'),
+          action: () => void navigator.clipboard.writeText(externalUrl).then(() => store.toast(tr(`コピーしました: ${externalUrl}`, `Copied: ${externalUrl}`, `已复制：${externalUrl}`))),
+        },
+        { label: tr('ブラウザで開く', 'Open in browser', '在浏览器中打开'), action: () => void store.openExternal(externalUrl) },
+      );
+    }
+
+    store.openMenu(e, items);
+  }
 </script>
 
 <div class="scroller" bind:this={scroller} onscroll={onScroll}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="markdown-body" style:font-size="{store.config.previewFontSize}px" bind:this={content} onclick={onClick}></div>
+  <div class="markdown-body" style:font-size="{store.config.previewFontSize}px" bind:this={content} onclick={onClick} oncontextmenu={onContextMenu}></div>
 </div>
 
 <style>

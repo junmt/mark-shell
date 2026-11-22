@@ -1460,7 +1460,7 @@ class GitStore {
 
   /** 開いているファイルのステージの内容（変更の帯の基準）を読む */
   async updateBase(doc: Doc | null) {
-    if (!doc) return;
+    if (!doc || doc.kind !== 'text') return;
     const repo = this.repoForRoot(doc.path);
     if (!repo || store.config.gitGutter === false || !this.enabled) {
       doc.gitBase = null;

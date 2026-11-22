@@ -2,9 +2,11 @@
   import { store } from '../lib/store.svelte';
   import { tr } from '../lib/i18n.svelte';
   import { git } from '../lib/git.svelte';
+  import { formatBytes, imageFormatLabel } from '../lib/image';
 
   const doc = $derived(store.activeDoc);
-  const chars = $derived(doc ? [...doc.text.replace(/\s/g, '')].length : 0);
+  const isImageDoc = $derived(doc?.kind === 'image');
+  const chars = $derived(doc && !isImageDoc ? [...doc.text.replace(/\s/g, '')].length : 0);
   const encodingLabel = (e: string) =>
     ({ 'utf-8': 'UTF-8', 'utf-8-bom': 'UTF-8 (BOM)', 'utf-16le': 'UTF-16 LE', 'utf-16be': 'UTF-16 BE' })[e] ?? e;
 </script>
@@ -36,34 +38,51 @@
   {#if store.aiRunning}<span class="ai">✦ {tr('AI セッション実行中', 'AI session running', 'AI 会话运行中')}</span>{/if}
   <span class="spacer"></span>
   {#if doc}
-    <span
-      >{doc.busy
-        ? tr('保存中…', 'Saving…', '保存中…')
-        : store.conflict?.doc === doc
-          ? tr('競合（未保存）', 'Conflict (unsaved)', '冲突（未保存）')
-          : doc.dirty
-            ? tr('未保存', 'Unsaved', '未保存')
-            : tr('保存済み', 'Saved', '已保存')}</span
-    >
-    <span>{tr(`行 ${store.cursor.line}、列 ${store.cursor.col}`, `Ln ${store.cursor.line}, Col ${store.cursor.col}`, `行 ${store.cursor.line}，列 ${store.cursor.col}`)}</span>
-    <span title={tr('空白を除いた文字数', 'Characters excluding whitespace', '不含空白的字符数')}
-      >{tr(`${chars.toLocaleString()} 文字`, `${chars.toLocaleString()} chars`, `${chars.toLocaleString()} 字`)}</span
-    >
-    {#if store.isMarkdown(doc.path)}
-      <span>Markdown</span>
+    {#if isImageDoc}
+      {#if doc.imageMeta}
+        <span>{doc.imageMeta.width} × {doc.imageMeta.height}</span>
+        <span>
+          {doc.imageMeta.zoom === null
+            ? `${Math.round(doc.imageMeta.fitScale * 100)}% (${tr('全体', 'Fit', '适合')})`
+            : `${Math.round(doc.imageMeta.zoom * 100)}%`}
+        </span>
+      {/if}
+      <span>{formatBytes(doc.fileSize)}</span>
+      <span>{imageFormatLabel(doc.path)}</span>
+      {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
     {:else}
-      <button
-        class="branch"
-        onclick={() => (store.palette = 'language')}
-        title={doc.language
-          ? tr('手動で選んだ色付けの言語（クリックで変更）', 'Language chosen manually (click to change)', '手动选择的语言（点击更改）')
-          : tr('自動で選んだ色付けの言語（クリックで変更）', 'Language detected automatically (click to change)', '自动检测的语言（点击更改）')}
-        >{doc.languageName ?? tr('プレーンテキスト', 'Plain Text', '纯文本')}</button
+      <span
+        >{doc.busy
+          ? tr('保存中…', 'Saving…', '保存中…')
+          : store.conflict?.doc === doc
+            ? tr('競合（未保存）', 'Conflict (unsaved)', '冲突（未保存）')
+            : doc.dirty
+              ? tr('未保存', 'Unsaved', '未保存')
+              : tr('保存済み', 'Saved', '已保存')}</span
       >
+      {#if doc.imageMeta && store.isSvg(doc.path) && doc.mode !== 'edit'}
+        <span>{doc.imageMeta.width} × {doc.imageMeta.height}</span>
+      {/if}
+      <span>{tr(`行 ${store.cursor.line}、列 ${store.cursor.col}`, `Ln ${store.cursor.line}, Col ${store.cursor.col}`, `行 ${store.cursor.line}，列 ${store.cursor.col}`)}</span>
+      <span title={tr('空白を除いた文字数', 'Characters excluding whitespace', '不含空白的字符数')}
+        >{tr(`${chars.toLocaleString()} 文字`, `${chars.toLocaleString()} chars`, `${chars.toLocaleString()} 字`)}</span
+      >
+      {#if store.isMarkdown(doc.path)}
+        <span>Markdown</span>
+      {:else}
+        <button
+          class="branch"
+          onclick={() => (store.palette = 'language')}
+          title={doc.language
+            ? tr('手動で選んだ色付けの言語（クリックで変更）', 'Language chosen manually (click to change)', '手动选择的语言（点击更改）')
+            : tr('自動で選んだ色付けの言語（クリックで変更）', 'Language detected automatically (click to change)', '自动检测的语言（点击更改）')}
+          >{doc.languageName ?? tr('プレーンテキスト', 'Plain Text', '纯文本')}</button
+        >
+      {/if}
+      <span>{encodingLabel(doc.encoding)}</span>
+      <span>{doc.eol === 'crlf' ? 'CRLF' : 'LF'}</span>
+      {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
     {/if}
-    <span>{encodingLabel(doc.encoding)}</span>
-    <span>{doc.eol === 'crlf' ? 'CRLF' : 'LF'}</span>
-    {#if doc.readonly}<span>{tr('読み取り専用', 'Read-only', '只读')}</span>{/if}
   {/if}
 </footer>
 

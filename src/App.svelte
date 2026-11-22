@@ -34,8 +34,10 @@
     // ページ全体の拡大を止めるため passive にしない
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !(isMac && e.metaKey)) return;
-      e.preventDefault();
       const el = e.target instanceof Element ? e.target : null;
+      // 画像プレビュー上では ImagePreview 側でズーム倍率を変える
+      if (el?.closest('.image-preview')) return;
+      e.preventDefault();
       const target = el?.closest('.term')
         ? 'terminal'
         : el?.closest('.markdown-body, .scroller')
@@ -154,6 +156,16 @@
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
       if (key === 'w') return run(() => store.activePath && void store.closeTab(store.activePath));
       if (key === ',') return run(() => (store.settingsOpen = true));
+      if (key === 'c' && store.activeDoc?.kind === 'image' && !store.activeDoc.deleted) {
+        const el = e.target;
+        const inInput =
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement ||
+          (el instanceof HTMLElement && el.isContentEditable);
+        if (!inInput && !window.getSelection()?.toString()) {
+          return run(() => store.activeDoc && void store.copyImage({ path: store.activeDoc.path }));
+        }
+      }
     }
   }
 

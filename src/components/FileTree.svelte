@@ -1,6 +1,6 @@
 <script lang="ts">
   import { store, type MenuItem } from '../lib/store.svelte';
-  import { api } from '../lib/api';
+  import { api, errorMessage } from '../lib/api';
   import { isMac, tr } from '../lib/i18n.svelte';
   import { basename, dirname, isImage, isInside, join } from '../lib/paths';
   import type { TreeNode } from '../lib/tree';
@@ -62,7 +62,18 @@
         { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(node.path, false) },
         { label: tr('相対パスをコピー', 'Copy relative path', '复制相对路径'), action: () => void store.copyPath(node.path, true) },
       );
-      if (!node.dir) items.push({ label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'), action: () => void store.openFile(node.path, { pin: true }) });
+      if (!node.dir && isImage(node.path)) {
+        items.push({ label: tr('画像をコピー', 'Copy image', '复制图片'), action: () => void store.copyImage({ path: node.path }) });
+      }
+      if (!node.dir) {
+        items.push({ label: tr('新しいタブで開く', 'Open in new tab', '在新标签页中打开'), action: () => void store.openFile(node.path, { pin: true }) });
+        if (isImage(node.path)) {
+          items.push({
+            label: tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+            action: () => void api.openWithDefaultApp(node.path).catch((err) => store.toast(errorMessage(err), 'error')),
+          });
+        }
+      }
       if (git.repoForRoot(node.path)) {
         const mark = git.marks.get(node.path);
         items.push({ label: '', separator: true });

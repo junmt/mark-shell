@@ -9,7 +9,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { check as checkUpdate, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
-import { escapeHtml, renderMarkdown } from './markdown';
+import { escapeHtml, mdimgUrl, renderMarkdown } from './markdown';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
@@ -18,6 +18,7 @@ import {
   errorMessage,
   type Change,
   type Entry,
+  type ImageInfo,
   type ReadResult,
   type SearchHit,
   type SearchOptions,
@@ -27,6 +28,8 @@ import {
   type ToolInfo,
   type WslInfo,
 } from './api';
+import { copyImgElementToClipboard, copyLocalImageToClipboard, copySvgTextToClipboard, svgToDataUrl } from './image';
+import { prepareHtmlPreview } from './htmlPreview';
 import { defaultConfig, mergeConfig, type Config } from './config';
 import { resolveTheme } from './themes';
 import { VSCODE_SETTINGS, projectColorsFromText, type ProjectColors } from './vscodeColors';
@@ -49,6 +52,7 @@ export type Mode = 'edit' | 'preview' | 'split';
 export type LeftView = 'files' | 'search' | 'outline' | 'git';
 
 export class Doc {
+  kind: 'text' | 'image' = 'text';
   path = $state('');
   /** 編集中の本文 */
   text = $state('');
@@ -58,6 +62,12 @@ export class Doc {
   pinned = $state(false);
   mode = $state<Mode>('edit');
   deleted = $state(false);
+  /** 画像ファイルのバイト数（ステータスバー表示用） */
+  fileSize = $state(0);
+  /** 外部で更新された画像を読み込み直すための世代番号 */
+  imageVersion = $state(0);
+  /** 表示中の画像の解像度とズーム状態（ステータスバー表示用） */
+  imageMeta = $state<{ width: number; height: number; zoom: number | null; fitScale: number } | null>(null);
   /** 手動で選んだ色付けの言語（null なら拡張子などから自動）。Markdown 以外のファイルだけ */
   language = $state<string | null>(null);
   /** 実際に使っている言語の名前（色付けなしなら null） */
@@ -74,7 +84,7 @@ export class Doc {
   busy = $state(false);
   autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   recoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  dirty = $derived(this.text !== this.saved || this.deleted);
+  dirty = $derived(this.kind === 'text' && (this.text !== this.saved || this.deleted));
 
   constructor(path: string, r: ReadResult) {
     this.path = path;
@@ -83,6 +93,14 @@ export class Doc {
     this.readonly = r.readonly;
     this.encoding = r.encoding;
     this.eol = r.eol;
+  }
+
+  static image(path: string, info: ImageInfo): Doc {
+    const doc = new Doc(path, { content: '', encoding: 'utf-8', eol: 'lf', readonly: info.readonly, mtime: info.mtime });
+    doc.kind = 'image';
+    doc.mode = 'preview';
+    doc.fileSize = info.size;
+    return doc;
   }
 }
 
@@ -178,6 +196,8 @@ class Store {
   view: EditorView | null = null;
   pendingReveal: { path: string; line: number } | null = null;
   revealSeq = $state(0);
+  /** ローカル CSS が外部で変更されたときに HTML プレビューを再描画するための世代番号 */
+  cssVersion = $state(0);
 
   // ---- レイアウト ----
   leftVisible = $state(true);
@@ -268,6 +288,27 @@ class Store {
   isMarkdown(path: string): boolean {
     const ext = extname(path).replace(/^\./, '').toLowerCase();
     return this.config.markdownExtensions.some((x) => x.toLowerCase() === ext);
+  }
+
+  /** SVG ファイルか（テキスト編集と画像プレビューの両方に対応） */
+  isSvg(path: string): boolean {
+    return extname(path) === 'svg';
+  }
+
+  /** HTML ファイルか（テキスト編集と HTML プレビューの両方に対応） */
+  isHtml(path: string): boolean {
+    const ext = extname(path);
+    return ext === 'html' || ext === 'htm';
+  }
+
+  /** ラスター画像ファイルか（画像プレビュー専用で開く） */
+  isImageFile(path: string): boolean {
+    return isImage(path) && !this.isSvg(path);
+  }
+
+  /** 編集 / 分割 / プレビューを切り替えられるファイルか */
+  hasPreview(path: string): boolean {
+    return this.isMarkdown(path) || this.isSvg(path) || this.isHtml(path);
   }
 
   /** 開けるファイルの一覧（リンク補完用） */
@@ -736,6 +777,7 @@ class Store {
     git.onFsChange([...touched]);
     const settings = VSCODE_SETTINGS.toLowerCase();
     if ([...touched].some((p) => settings === p.toLowerCase() || settings.startsWith(p.toLowerCase() + '/'))) void this.loadProjectColors();
+    if ([...touched].some((p) => extname(p) === 'css')) this.cssVersion++;
     for (const p of touched) {
       const lower = p.toLowerCase();
       for (const doc of this.docs) {
@@ -759,6 +801,22 @@ class Store {
 
   /** 開いているファイルが外で変わったかを確かめて取り込む */
   private async checkExternal(doc: Doc) {
+    if (doc.kind === 'image') {
+      try {
+        const info = await api.imageInfo(doc.path);
+        doc.deleted = false;
+        doc.readonly = info.readonly;
+        doc.fileSize = info.size;
+        doc.imageVersion++;
+      } catch {
+        const exists = await api.pathExists(doc.path).catch(() => false);
+        if (!exists && !doc.deleted) {
+          doc.deleted = true;
+          this.toast(tr(`${doc.path} は削除されました`, `${doc.path} was deleted`, `${doc.path} 已被删除`));
+        }
+      }
+      return;
+    }
     if (doc.saving) await doc.saving;
     let disk: ReadResult;
     try {
@@ -858,33 +916,59 @@ class Store {
       this.activate(existing.path, opts.line);
       return;
     }
-    let r: ReadResult;
-    try {
-      r = await api.readFile(path);
-    } catch (e) {
-      const msg = errorMessage(e);
-      if (opts.missingOk) {
-        r = { content: '', encoding: 'utf-8', eol: 'lf', readonly: false, mtime: 0 };
-      } else if (msg.startsWith(NOT_TEXT_PREFIX)) {
-        // 画像や Office のファイルなどは、Windows の既定のアプリで開けるようにする
-        if (opts.quiet) return;
-        const reason = msg.slice(NOT_TEXT_PREFIX.length);
-        const ok = await this.confirm(
-          tr('ファイルを開く', 'Open file', '打开文件'),
-          tr(`${reason}。既定のアプリで開きますか？`, `${reason}. Open it in the default app?`, `${reason}。要用默认应用打开吗？`),
-          tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
-        );
-        if (ok) await api.openWithDefaultApp(path).catch((err) => this.toast(errorMessage(err), 'error'));
-        return;
-      } else {
-        if (!opts.quiet) this.toast(msg, 'error');
+    let doc: Doc;
+    if (this.isImageFile(path)) {
+      try {
+        const info = await api.imageInfo(path);
+        doc = Doc.image(path, info);
+      } catch (e) {
+        if (!opts.quiet) this.toast(errorMessage(e), 'error');
         return;
       }
+      doc.pinned = !!opts.pin;
+    } else {
+      let r: ReadResult;
+      try {
+        r = await api.readFile(path);
+      } catch (e) {
+        const msg = errorMessage(e);
+        if (opts.missingOk) {
+          r = { content: '', encoding: 'utf-8', eol: 'lf', readonly: false, mtime: 0 };
+        } else if (this.isSvg(path) && msg.startsWith(NOT_TEXT_PREFIX)) {
+          try {
+            const info = await api.imageInfo(path);
+            doc = Doc.image(path, info);
+            doc.pinned = !!opts.pin;
+            const preview = this.docs.findIndex((d) => !d.pinned && !d.dirty);
+            if (preview >= 0 && !opts.pin) this.docs.splice(preview, 1, doc);
+            else this.docs.push(doc);
+            this.activate(path, opts.line);
+            return;
+          } catch (e2) {
+            if (!opts.quiet) this.toast(errorMessage(e2), 'error');
+            return;
+          }
+        } else if (msg.startsWith(NOT_TEXT_PREFIX)) {
+          // Office や PDF などエディタで開けないファイルは、OS の既定のアプリで開けるようにする
+          if (opts.quiet) return;
+          const reason = msg.slice(NOT_TEXT_PREFIX.length);
+          const ok = await this.confirm(
+            tr('ファイルを開く', 'Open file', '打开文件'),
+            tr(`${reason}。既定のアプリで開きますか？`, `${reason}. Open it in the default app?`, `${reason}。要用默认应用打开吗？`),
+            tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+          );
+          if (ok) await api.openWithDefaultApp(path).catch((err) => this.toast(errorMessage(err), 'error'));
+          return;
+        } else {
+          if (!opts.quiet) this.toast(msg, 'error');
+          return;
+        }
+      }
+      doc = new Doc(path, r);
+      doc.language = this.languageOverrides[path] ?? null;
+      doc.pinned = !!opts.pin;
+      doc.mode = opts.mode ?? (this.isSvg(path) || this.isHtml(path) ? 'preview' : 'edit');
     }
-    const doc = new Doc(path, r);
-    doc.language = this.languageOverrides[path] ?? null;
-    doc.pinned = !!opts.pin;
-    doc.mode = opts.mode ?? 'edit';
     // 仮タブ（固定していないタブ）は次に開くファイルで置き換える
     const preview = this.docs.findIndex((d) => !d.pinned && !d.dirty);
     if (preview >= 0 && !opts.pin) this.docs.splice(preview, 1, doc);
@@ -972,7 +1056,7 @@ class Store {
 
   cycleMode() {
     const doc = this.activeDoc;
-    if (!doc || !this.isMarkdown(doc.path)) return;
+    if (!doc || !this.hasPreview(doc.path)) return;
     doc.mode = doc.mode === 'edit' ? 'split' : doc.mode === 'split' ? 'preview' : 'edit';
     this.saveWorkspaceState();
   }
@@ -994,6 +1078,7 @@ class Store {
 
   /** 保存する。成功すれば true */
   async save(doc: Doc, force = false): Promise<boolean> {
+    if (doc.kind !== 'text') return true;
     if (doc.autosaveTimer) clearTimeout(doc.autosaveTimer);
     if (doc.saving) await doc.saving;
     if (!doc.dirty && !force) return true;
@@ -1224,6 +1309,24 @@ class Store {
     const text = rel ? path : await api.absolutePath(path);
     await navigator.clipboard.writeText(text);
     this.toast(tr(`コピーしました: ${text}`, `Copied: ${text}`, `已复制：${text}`));
+  }
+
+  /** 画像をクリップボードへコピーする（ワークスペースの画像・編集中の SVG・プレビュー内の <img>） */
+  async copyImage(target: { path?: string; svgText?: string; img?: HTMLImageElement }) {
+    try {
+      if (target.svgText !== undefined) {
+        await copySvgTextToClipboard(target.svgText);
+      } else if (target.path !== undefined) {
+        await copyLocalImageToClipboard(target.path);
+      } else if (target.img) {
+        await copyImgElementToClipboard(target.img);
+      } else {
+        return;
+      }
+      this.toast(tr('画像をクリップボードにコピーしました', 'Copied image to clipboard', '已将图片复制到剪贴板'));
+    } catch (e) {
+      this.toast(errorMessage(e), 'error');
+    }
   }
 
   // ================= 貼り付け・ドロップ =================
@@ -1685,7 +1788,12 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
         return;
       }
     } else if (isImage(target)) {
-      await api.revealInExplorer(target).catch(() => {});
+      const exists = !!entry || (await api.pathExists(target).catch(() => false));
+      if (!exists) {
+        this.toast(tr(`${target} が見つかりません`, `${target} was not found`, `找不到 ${target}`), 'error');
+        return;
+      }
+      await this.openFile(target, { pin: true });
       return;
     }
     await this.openFile(target, { pin: true });
@@ -1831,9 +1939,24 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
   async print() {
     const doc = this.activeDoc;
     if (!doc) return;
-    this.printHtml = this.isMarkdown(doc.path)
-      ? renderMarkdown(doc.text, { root: this.root ?? '', notePath: doc.path, externalImages: 'always' })
-      : `<pre>${escapeHtml(doc.text)}</pre>`;
+    if (doc.kind === 'image') {
+      const src = `${mdimgUrl(doc.path)}?v=${doc.imageVersion}`;
+      this.printHtml = `<div style="text-align:center"><img src="${escapeHtml(src)}" alt="${escapeHtml(basename(doc.path))}" style="max-width:100%;max-height:95vh;object-fit:contain" /></div>`;
+    } else if (this.isSvg(doc.path) && doc.mode !== 'edit') {
+      const src = svgToDataUrl(doc.text);
+      this.printHtml = `<div style="text-align:center"><img src="${escapeHtml(src)}" alt="${escapeHtml(basename(doc.path))}" style="max-width:100%;max-height:95vh;object-fit:contain" /></div>`;
+    } else if (this.isHtml(doc.path) && doc.mode !== 'edit') {
+      const res = await prepareHtmlPreview(doc.text, {
+        root: this.root ?? '',
+        filePath: doc.path,
+        externalImages: 'always',
+      });
+      this.printHtml = res.bodyHtml;
+    } else {
+      this.printHtml = this.isMarkdown(doc.path)
+        ? renderMarkdown(doc.text, { root: this.root ?? '', notePath: doc.path, externalImages: 'always' })
+        : `<pre>${escapeHtml(doc.text)}</pre>`;
+    }
     // 描画を待ってから印刷する
     setTimeout(() => {
       window.print();
@@ -1872,8 +1995,17 @@ This folder holds Markdown notes. They are viewed and edited with an app called 
       {
         id: 'language',
         label: tr('言語モードの変更（色付けの言語を選ぶ）', 'Change language mode (syntax highlighting)', '更改语言模式（语法高亮）'),
-        run: () => doc && !this.isMarkdown(doc.path) && (this.palette = 'language'),
+        run: () => doc && doc.kind === 'text' && !this.isMarkdown(doc.path) && (this.palette = 'language'),
       },
+      ...(doc && (doc.kind === 'image' || this.isSvg(doc.path))
+        ? [
+            {
+              id: 'copyImage',
+              label: tr('画像をクリップボードにコピー', 'Copy image to clipboard', '将图片复制到剪贴板'),
+              run: () => void this.copyImage(doc.kind === 'text' && this.isSvg(doc.path) ? { svgText: doc.text } : { path: doc.path }),
+            },
+          ]
+        : []),
       { id: 'newTerminal', label: tr('新しいターミナル', 'New terminal', '新建终端'), run: () => this.newTerminal() },
       {
         id: 'splitTerminalRight',

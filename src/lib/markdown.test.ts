@@ -62,6 +62,7 @@ describe('renderMarkdown', () => {
     const d = render('![](assets/a%20b.png) ![](https://example.com/x.png) ![](../../outside.png)');
     const imgs = d.querySelectorAll<HTMLImageElement>('img');
     expect(imgs[0].getAttribute('src')).toBe(MDIMG_BASE + 'notes/assets/a%20b.png');
+    expect(imgs[0].dataset.localPath).toBe('notes/assets/a b.png');
     expect(imgs[1].getAttribute('src')).toBeNull();
     expect(imgs[1].dataset.src).toBe('https://example.com/x.png');
     expect(imgs[2].getAttribute('src')).toBeNull();

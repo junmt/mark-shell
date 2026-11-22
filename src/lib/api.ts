@@ -17,6 +17,12 @@ export type ReadResult = {
   mtime: number;
 };
 
+export type ImageInfo = {
+  size: number;
+  readonly: boolean;
+  mtime: number;
+};
+
 export type WslInfo = { distro: string; linuxRoot: string };
 export type OpenResult = { root: string; name: string; gen: number; wsl: WslInfo | null; wslError: string | null };
 export type RecoveryEntry = { path: string; content: string; time: number };
@@ -88,6 +94,10 @@ export const api = {
   rescan: () => invoke<number>('rescan'),
   listDir: (path: string) => invoke<Entry[]>('list_dir', { path }),
   readFile: (path: string) => invoke<ReadResult>('read_file', { path }),
+  imageInfo: (path: string) => invoke<ImageInfo>('image_info', { path }),
+  readImageDataUrl: (path: string) => invoke<string>('read_image_data_url', { path }),
+  copyImageFile: (path: string) => invoke<void>('copy_image_file', { path }),
+  copyImagePng: (data: string) => invoke<void>('copy_image_png', { data }),
   writeFile: (path: string, content: string, encoding: string, eol: string) =>
     invoke<number>('write_file', { path, content, encoding, eol }),
   createFile: (path: string, content?: string) => invoke<string>('create_file', { path, content }),

@@ -1,6 +1,7 @@
 mod ai_context;
 mod ai_tools;
 mod cli;
+mod clipboard;
 mod config;
 mod git;
 mod memory;
@@ -113,7 +114,11 @@ pub fn run() {
             workspace::rescan,
             workspace::list_dir,
             workspace::read_file,
+            workspace::image_info,
+            workspace::read_image_data_url,
             workspace::write_file,
+            clipboard::copy_image_file,
+            clipboard::copy_image_png,
             workspace::create_file,
             workspace::create_dir,
             workspace::rename_path,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store, type Doc } from '../lib/store.svelte';
-  import { basename, dirname } from '../lib/paths';
+  import { api, errorMessage } from '../lib/api';
+  import { basename, dirname, isImage } from '../lib/paths';
   import { tr } from '../lib/i18n.svelte';
   import { git, type GitTab } from '../lib/git.svelte';
 
@@ -50,6 +51,18 @@
       { label: '', separator: true },
       { label: tr('ツリーで表示', 'Reveal in tree', '在树中显示'), action: () => store.showLeft('files') },
       { label: tr('パスをコピー', 'Copy path', '复制路径'), action: () => void store.copyPath(doc.path, false) },
+      ...(isImage(doc.path)
+        ? [
+            {
+              label: tr('画像をコピー', 'Copy image', '复制图片'),
+              action: () => void store.copyImage(doc.kind === 'text' && store.isSvg(doc.path) ? { svgText: doc.text } : { path: doc.path }),
+            },
+            {
+              label: tr('既定のアプリで開く', 'Open in default app', '用默认应用打开'),
+              action: () => void api.openWithDefaultApp(doc.path).catch((err) => store.toast(errorMessage(err), 'error')),
+            },
+          ]
+        : []),
       ...gitItems(doc),
     ]);
   }

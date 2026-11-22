@@ -216,6 +216,57 @@ pub fn read_file(state: State<'_, AppState>, path: String) -> Result<ReadResult,
     })
 }
 
+#[derive(Serialize)]
+pub struct ImageInfo {
+    size: u64,
+    readonly: bool,
+    mtime: u64,
+}
+
+/// 画像ファイルのメタ情報を返す（画像プレビュータブを開く・外部変更を検知するときに使う）
+#[tauri::command]
+pub fn image_info(state: State<'_, AppState>, path: String) -> Result<ImageInfo, String> {
+    let root = state.root()?;
+    let p = resolve(&root, &path)?;
+    let meta = fs::metadata(&p).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))?;
+    if !meta.is_file() {
+        return Err(tr!("{path} はファイルではありません", "{path} is not a file", "{path} 不是文件"));
+    }
+    Ok(ImageInfo {
+        size: meta.len(),
+        readonly: meta.permissions().readonly(),
+        mtime: mtime_ms(&meta),
+    })
+}
+
+/// ワークスペース内の画像を data URL として返す（PNG 以外の形式を画面側で PNG 化してクリップボードにコピーする用）
+#[tauri::command]
+pub async fn read_image_data_url(app: AppHandle, path: String) -> Result<String, String> {
+    let root = app.state::<AppState>().root()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = resolve(&root, &path)?;
+        let ct = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(crate::protocol::mime)
+            .ok_or_else(|| tr!("{path} は画像ファイルではありません", "{path} is not an image file", "{path} 不是图片文件"))?;
+        let meta = fs::metadata(&p).map_err(|e| tr!("{path} を開けません: {e}", "Cannot open {path}: {e}", "无法打开 {path}：{e}"))?;
+        if meta.len() > MAX_OPEN_BYTES {
+            let (size, max) = (meta.len() / 1024 / 1024, MAX_OPEN_BYTES / 1024 / 1024);
+            return Err(tr!(
+                "{path} は大きすぎるためコピーできません（{size} MB。上限は {max} MB）",
+                "{path} is too large to copy ({size} MB; limit is {max} MB)",
+                "{path} 太大，无法复制（{size} MB，上限为 {max} MB）"
+            ));
+        }
+        let bytes = fs::read(&p).map_err(|e| tr!("{path} を読めません: {e}", "Cannot read {path}: {e}", "无法读取 {path}：{e}"))?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:{ct};base64,{b64}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 保存。戻り値は保存後の更新日時
 #[tauri::command]
 pub fn write_file(state: State<'_, AppState>, path: String, content: String, encoding: String, eol: String) -> Result<u64, String> {
