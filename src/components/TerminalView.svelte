@@ -121,6 +121,8 @@
           return false;
         }
         if (e.metaKey && !e.ctrlKey && !e.altKey && key === 'v') {
+          // false を返すだけではブラウザの paste イベントも起き、xterm.js がもう一度貼り付けてしまう
+          e.preventDefault();
           void paste();
           return false;
         }
@@ -132,6 +134,8 @@
         return false;
       }
       if (e.ctrlKey && key === 'v') {
+        // false を返すだけではブラウザの paste イベントも起き、xterm.js がもう一度貼り付けてしまう
+        e.preventDefault();
         void paste();
         return false;
       }
