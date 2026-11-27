@@ -20,7 +20,8 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { yamlFrontmatter } from '@codemirror/lang-yaml';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, indentUnit, LanguageDescription } from '@codemirror/language';
-import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { markSearch, openReplacePanel } from './searchPanel';
 import {
   autocompletion,
   closeBrackets,
@@ -79,9 +80,17 @@ const baseTheme = EditorView.theme({
   },
   '.cm-cursor': { borderLeftColor: 'var(--fg)' },
   '.cm-panels': { backgroundColor: 'var(--bg-alt)', color: 'var(--fg)' },
-  '.cm-searchMatch': { backgroundColor: 'var(--search-match)' },
+  '.cm-panels-top': { borderBottom: '1px solid var(--border)' },
+  '.cm-searchMatch': { backgroundColor: 'var(--search-match)', borderRadius: '2px' },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'var(--search-match-current, rgba(255, 140, 0, 0.55))',
+    outline: '1px solid var(--search-match-outline, rgba(230, 120, 0, 0.9))',
+  },
   '.cm-tooltip': { backgroundColor: 'var(--bg-alt)', border: '1px solid var(--border)' },
 });
+
+/** 検索のキー割り当て。Ctrl+H は置換欄を開いた状態で検索パネルを出す */
+const searchKeymaps = [{ key: 'Mod-h', run: openReplacePanel, scope: 'editor search-panel' }, ...searchKeymap];
 
 /** 全角文字は幅 2 として数える（表の整形用） */
 export function displayWidth(s: string): number {
@@ -443,11 +452,11 @@ export function createExtensions(
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
-    search({ top: true }),
+    markSearch(),
     opts.markdown ? markdownExtensions(hooks) : languageComp.of([]),
     syntaxHighlighting(highlightStyle),
     baseTheme,
-    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymaps, ...historyKeymap, ...completionKeymap, indentWithTab]),
     EditorView.updateListener.of((u) => {
       if (u.docChanged) {
         const external = u.transactions.every((tr) => !tr.docChanged || tr.isUserEvent('external'));
@@ -489,8 +498,8 @@ export function viewerExtensions(opts: { markdown: boolean; wrap: boolean; readO
     baseTheme,
     EditorView.theme({ '.cm-content': { paddingBottom: '24px' } }),
     EditorState.phrases.of({ '$ unchanged lines': tr('$ 行は同じ', '$ unchanged lines', '$ 行未更改') }),
-    search({ top: true }),
-    keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap]),
+    markSearch(),
+    keymap.of([...defaultKeymap, ...searchKeymaps, ...historyKeymap]),
   ];
 }
 

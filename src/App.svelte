@@ -22,6 +22,7 @@
   import { api } from './lib/api';
   import { opaque } from './lib/vscodeColors';
   import { isMac } from './lib/i18n.svelte';
+  import { openSearchIn } from './lib/searchPanel';
 
   let leftHeight = $state(600);
   /** ウィンドウが前面にあるか（タイトルバーの色を変える） */
@@ -156,6 +157,12 @@
       if (key === 's') return run(() => store.activeDoc && void store.save(store.activeDoc, true));
       if (key === 'w') return run(() => store.activePath && void store.closeTab(store.activePath));
       if (key === ',') return run(() => (store.settingsOpen = true));
+      // エディタの外（プレビューやファイル一覧など）で Ctrl+F / Ctrl+H を押したら、表示中のエディタの検索を開く。
+      // エディタの中ではエディタ自身のキー割り当てに任せる
+      if ((key === 'f' || key === 'h') && store.view && !(e.target instanceof HTMLElement && e.target.closest('.cm-editor'))) {
+        const view = store.view;
+        return run(() => openSearchIn(view, key === 'h'));
+      }
       if (key === 'c' && store.activeDoc?.kind === 'image' && !store.activeDoc.deleted) {
         const el = e.target;
         const inInput =
